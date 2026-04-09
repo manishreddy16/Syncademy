@@ -61,6 +61,22 @@ export const createAssignment = async (
   }
 };
 
+export const createAssignmentOffline = async (
+  assignment: Omit<Assignment, 'id' | 'createdAt'>
+): Promise<void> => {
+  const key = `assignment_create_${assignment.schoolId}_${Date.now()}`;
+  const pendingAssignment = {
+    ...assignment,
+    createdAt: Date.now(),
+    key,
+    offlineKey: key,
+    status: 'pending',
+    action: 'create',
+  };
+
+  await savePending('assignments', pendingAssignment);
+};
+
 // Get assignments for school
 export const getSchoolAssignments = async (schoolId: string): Promise<Assignment[]> => {
   try {

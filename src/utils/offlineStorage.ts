@@ -3,6 +3,9 @@
 
 const DB_NAME = 'syncademy_offline_db';
 const DB_VERSION = 1;
+const OFFLINE_PREFIX = 'offline_';
+const PENDING_PREFIX = 'pending_';
+const PENDING_SYNC_PREFIX = 'pending_sync_';
 
 export interface StorageItem {
   key: string;
@@ -24,29 +27,34 @@ let db: IDBDatabase | null = null;
 export const initOfflineStorage = async (): Promise<void> => {
   if (db) return;
 
-  try {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+  await new Promise<void>((resolve) => {
+    try {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onerror = () => {
-      console.warn('IndexedDB failed, falling back to localStorage');
-    };
+      request.onerror = () => {
+        console.warn('IndexedDB failed, falling back to localStorage');
+        resolve();
+      };
 
-    request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
-      const database = (event.target as IDBOpenDBRequest).result;
-      if (!database.objectStoreNames.contains('items')) {
-        database.createObjectStore('items', { keyPath: 'key' });
-      }
-      if (!database.objectStoreNames.contains('pendingSyncs')) {
-        database.createObjectStore('pendingSyncs', { keyPath: 'key' });
-      }
-    };
+      request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
+        const database = (event.target as IDBOpenDBRequest).result;
+        if (!database.objectStoreNames.contains('items')) {
+          database.createObjectStore('items', { keyPath: 'key' });
+        }
+        if (!database.objectStoreNames.contains('pendingSyncs')) {
+          database.createObjectStore('pendingSyncs', { keyPath: 'key' });
+        }
+      };
 
-    request.onsuccess = (event: Event) => {
-      db = (event.target as IDBOpenDBRequest).result;
-    };
-  } catch (error) {
-    console.warn('Failed to initialize IndexedDB:', error);
-  }
+      request.onsuccess = (event: Event) => {
+        db = (event.target as IDBOpenDBRequest).result;
+        resolve();
+      };
+    } catch (error) {
+      console.warn('Failed to initialize IndexedDB:', error);
+      resolve();
+    }
+  });
 };
 
 // Set item in offline storage
@@ -59,9 +67,9 @@ export const setOfflineItem = async (key: string, value: any, markForSync: boole
   };
 
   if (!db) {
-    localStorage.setItem(`offline_${key}`, JSON.stringify(item));
+    localStorage.setItem(`${OFFLINE_PREFIX}${key}`, JSON.stringify(item));
     if (markForSync) {
-      localStorage.setItem(`pending_sync_${key}`, JSON.stringify(item));
+      localStorage.setItem(`${PENDING_SYNC_PREFIX}${key}`, JSON.stringify(item));
     }
     return;
   }
@@ -78,9 +86,9 @@ export const setOfflineItem = async (key: string, value: any, markForSync: boole
     }
   } catch (error) {
     console.warn('Failed to set offline item, using localStorage:', error);
-    localStorage.setItem(`offline_${key}`, JSON.stringify(item));
+    localStorage.setItem(`${OFFLINE_PREFIX}${key}`, JSON.stringify(item));
     if (markForSync) {
-      localStorage.setItem(`pending_sync_${key}`, JSON.stringify(item));
+      localStorage.setItem(`${PENDING_SYNC_PREFIX}${key}`, JSON.stringify(item));
     }
   }
 };
@@ -88,7 +96,7 @@ export const setOfflineItem = async (key: string, value: any, markForSync: boole
 // Get item from offline storage
 export const getOfflineItem = async (key: string): Promise<any | null> => {
   if (!db) {
-    const item = localStorage.getItem(`offline_${key}`);
+    const item = localStorage.getItem(`${OFFLINE_PREFIX}${key}`);
     return item ? JSON.parse(item).value : null;
   }
 
@@ -111,16 +119,15 @@ export const getOfflineItem = async (key: string): Promise<any | null> => {
   }
 };
 
-// Get all pending syncs
-export const getPendingSyncs = async (): Promise<StorageItem[]> => {
+const getPendingSyncsFromDB = async (): Promise<StorageItem[]> => {
   if (!db) {
     return Object.keys(localStorage)
-      .filter((k) => k.startsWith('pending_sync_'))
+      .filter((k) => k.startsWith(PENDING_SYNC_PREFIX))
       .map((k) => {
         const item = localStorage.getItem(k);
-        return item ? JSON.parse(item) : null;
+        return item ? JSON.parse(item) as StorageItem : null;
       })
-      .filter(Boolean);
+      .filter(Boolean) as StorageItem[];
   }
 
   try {
@@ -138,9 +145,42 @@ export const getPendingSyncs = async (): Promise<StorageItem[]> => {
       };
     });
   } catch (error) {
-    console.warn('Failed to get pending syncs:', error);
+    console.warn('Failed to get pending syncs from DB:', error);
     return [];
   }
+};
+
+export const getPendingSyncs = async (): Promise<StorageItem[]> => {
+  const localPending = await getAllPendingTasks();
+  const dbPending = await getPendingSyncsFromDB();
+  return [...localPending, ...dbPending];
+};
+
+export const getAllPendingTasks = async (): Promise<StorageItem[]> => {
+  const pendingKeys = Object.keys(localStorage).filter((k) => k.startsWith(PENDING_PREFIX));
+  const pendingItems: StorageItem[] = [];
+
+  for (const key of pendingKeys) {
+    try {
+      const stored = localStorage.getItem(key);
+      if (!stored) continue;
+      const items = JSON.parse(stored);
+      if (Array.isArray(items)) {
+        items.forEach((item: any) => {
+          pendingItems.push({
+            key: item.key || item.offlineKey || `${key}_${JSON.stringify(item)}`,
+            value: item,
+            timestamp: item.timestamp || Date.now(),
+            synced: false,
+          });
+        });
+      }
+    } catch (error) {
+      console.warn('Failed to parse pending task:', error);
+    }
+  }
+
+  return pendingItems;
 };
 
 export const getPendingSyncsByPrefix = async (prefix: string): Promise<StorageItem[]> => {
@@ -151,7 +191,7 @@ export const getPendingSyncsByPrefix = async (prefix: string): Promise<StorageIt
 export const getOfflineItemsByPrefix = async (prefix: string): Promise<StorageItem[]> => {
   if (!db) {
     return Object.keys(localStorage)
-      .filter((k) => k.startsWith('offline_'))
+      .filter((k) => k.startsWith(OFFLINE_PREFIX))
       .map((k) => {
         const item = localStorage.getItem(k);
         return item ? JSON.parse(item) : null;
@@ -179,7 +219,7 @@ export const getOfflineItemsByPrefix = async (prefix: string): Promise<StorageIt
   }
 };
 
-const getPendingStorageKey = (type: string): string => `pending_${type}`;
+const getPendingStorageKey = (type: string): string => `${PENDING_PREFIX}${type}`;
 
 export const savePending = async (type: string, value: any): Promise<void> => {
   const key = getPendingStorageKey(type);
@@ -218,7 +258,7 @@ export const syncPending = async (type: string, handler: (item: any) => Promise<
 // Mark item as synced
 export const markAsSynced = async (key: string): Promise<void> => {
   if (!db) {
-    localStorage.removeItem(`pending_sync_${key}`);
+    localStorage.removeItem(`${PENDING_SYNC_PREFIX}${key}`);
     return;
   }
 
@@ -235,7 +275,7 @@ export const markAsSynced = async (key: string): Promise<void> => {
 export const clearOfflineStorage = async (): Promise<void> => {
   if (!db) {
     Object.keys(localStorage)
-      .filter((k) => k.startsWith('offline_') || k.startsWith('pending_sync_'))
+      .filter((k) => k.startsWith(OFFLINE_PREFIX) || k.startsWith(PENDING_SYNC_PREFIX) || k.startsWith(PENDING_PREFIX))
       .forEach((k) => localStorage.removeItem(k));
     return;
   }
@@ -252,8 +292,8 @@ export const clearOfflineStorage = async (): Promise<void> => {
 // Remove specific item
 export const removeOfflineItem = async (key: string): Promise<void> => {
   if (!db) {
-    localStorage.removeItem(`offline_${key}`);
-    localStorage.removeItem(`pending_sync_${key}`);
+    localStorage.removeItem(`${OFFLINE_PREFIX}${key}`);
+    localStorage.removeItem(`${PENDING_SYNC_PREFIX}${key}`);
     return;
   }
 

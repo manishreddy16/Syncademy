@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { authLogin } from '../services/api';
+import { authLogin, googleSignIn } from '../services/api';
 
 interface LoginPageProps {
   onLogin: () => void;
@@ -65,6 +65,27 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
             {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
+        <div className="mt-4">
+          <button
+            onClick={async () => {
+              setError('');
+              setLoading(true);
+              try {
+                await googleSignIn();
+                onLogin();
+                navigate('/dashboard');
+              } catch (err: any) {
+                setError(err?.message || 'Google sign-in failed.');
+              } finally {
+                setLoading(false);
+              }
+            }}
+            disabled={loading}
+            className="w-full rounded-2xl border border-slate-800 bg-white/10 px-5 py-3 text-base font-semibold text-white hover:border-indigo-500 hover:bg-slate-900/90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? 'Signing in...' : 'Continue with Google'}
+          </button>
+        </div>
         <div className="mt-8 grid gap-3 sm:grid-cols-2">
           <Link
             to="/register-school"

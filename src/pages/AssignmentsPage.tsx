@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   createAssignment,
+  createAssignmentOffline,
   getSchoolAssignments,
   submitAssignment,
   submitAssignmentOffline,
@@ -72,15 +73,28 @@ const AssignmentsPage = ({ user }: AssignmentsPageProps) => {
     setCreating(true);
 
     try {
-      await createAssignment({
-        title,
-        description,
-        dueDate: new Date(dueDate).getTime(),
-        createdBy: user.uid,
-        schoolId: user.schoolId,
-      });
+      if (isOnline) {
+        await createAssignment({
+          title,
+          description,
+          dueDate: new Date(dueDate).getTime(),
+          createdBy: user.uid,
+          schoolId: user.schoolId,
+        });
 
-      setFeedback({ type: 'success', message: 'Assignment created successfully!' });
+        setFeedback({ type: 'success', message: 'Assignment created successfully!' });
+      } else {
+        await createAssignmentOffline({
+          title,
+          description,
+          dueDate: new Date(dueDate).getTime(),
+          createdBy: user.uid,
+          schoolId: user.schoolId,
+        });
+
+        setFeedback({ type: 'success', message: 'Assignment queued offline and will publish when online.' });
+      }
+
       setTitle('');
       setDescription('');
       setDueDate('');
@@ -194,14 +208,14 @@ const AssignmentsPage = ({ user }: AssignmentsPageProps) => {
               </div>
               <button
                 type="submit"
-                disabled={creating || !isOnline}
+                disabled={creating}
                 className="w-full rounded-2xl bg-indigo-600 px-5 py-3 text-white font-semibold hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {creating ? 'Creating...' : 'Publish Assignment'}
               </button>
 
               {!isOnline && (
-                <p className="text-sm text-yellow-300">⚠️ Must be online to create assignments</p>
+                <p className="text-sm text-yellow-300">⚠️ Assignment will be queued offline and synced when online.</p>
               )}
 
               {feedback.message && (

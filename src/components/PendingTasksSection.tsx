@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getPendingSyncs } from '../utils/offlineStorage';
+import { getAllPendingTasks } from '../utils/offlineStorage';
 import { getOnlineStatus, subscribeToOnlineStatus } from '../utils/onlineStatus';
 import { syncPendingData } from '../utils/autoSync';
 
@@ -19,7 +19,7 @@ const PendingTasksSection = ({ user }: PendingTasksSectionProps) => {
 
   useEffect(() => {
     const loadPendingTasks = async () => {
-      const tasks = await getPendingSyncs();
+      const tasks = await getAllPendingTasks();
       setPendingTasks(tasks);
     };
 

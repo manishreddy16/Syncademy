@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Route, Routes, useNavigate, useLocation } from 'react-router-dom';
+import { Route, Routes, useNavigate, Navigate } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from './firebase';
+import { auth, db } from './firebase';
+import { doc, getDoc } from 'firebase/firestore';
 import { initOfflineStorage } from './utils/offlineStorage';
 import { initOnlineStatus } from './utils/onlineStatus';
 import { initAutoSync } from './utils/autoSync';
-import { getCurrentUser, restoreSession, refreshSession, isAdminUser, isStudentUser } from './utils/auth';
+import { getCurrentUser, restoreSession, refreshSession, isAdminUser, isStudentUser, setAuth } from './utils/auth';
 import { initializeUserBalance } from './services/payment';
 
 import LoginPage from './pages/LoginPage';
@@ -27,7 +28,6 @@ function App() {
   const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
-  const location = useLocation();
 
   // Initialize offline services on app load
   useEffect(() => {
@@ -56,22 +56,33 @@ function App() {
 
   // Listen to Firebase auth changes
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      if (!firebaseUser && user) {
-        // User logged out
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
         setUser(null);
         navigate('/login');
-      } else if (firebaseUser && !user) {
-        // User logged in (from Firebase)
-        // The login service should have set the user in localStorage already
-        const currentUser = getCurrentUser();
-        if (currentUser) {
-          setUser(currentUser);
+        return;
+      }
+
+      const currentUser = getCurrentUser();
+      if (currentUser) {
+        setUser(currentUser);
+        return;
+      }
+
+      try {
+        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          const resolvedUser = { uid: firebaseUser.uid, ...userData };
+          setAuth(resolvedUser);
+          setUser(resolvedUser);
         }
+      } catch (error) {
+        console.error('Failed to restore user profile:', error);
       }
     });
     return unsubscribe;
-  }, [user, navigate]);
+  }, [navigate]);
 
   // Refresh session periodically
   useEffect(() => {
@@ -89,6 +100,9 @@ function App() {
     setUser(null);
     navigate('/login');
   };
+
+  const isAdmin = user?.role === 'admin';
+  const isStudent = user?.role === 'student';
 
   const adminNavItems = useMemo(
     () => [
@@ -132,13 +146,13 @@ function App() {
         <div className="lg:flex">
           <Sidebar
             user={user}
-            items={isAdminUser() ? adminNavItems : studentNavItems}
+            items={isAdmin ? adminNavItems : studentNavItems}
             onLogout={handleLogout}
           />
           <main className="flex-1 p-4 lg:p-8">
             <Routes>
               {/* Admin Routes */}
-              {isAdminUser() && (
+              {isAdmin && (
                 <>
                   <Route path="/admin/dashboard" element={<AdminDashboardPage user={user} />} />
                   <Route path="/admin/students" element={<AdminDashboardPage user={user} />} />
@@ -147,7 +161,7 @@ function App() {
               )}
 
               {/* Student Routes */}
-              {isStudentUser() && (
+              {isStudent && (
                 <>
                   <Route path="/student/dashboard" element={<StudentDashboardPage user={user} />} />
                   <Route path="/student/grades" element={<StudentDashboardPage user={user} />} />
@@ -155,40 +169,15 @@ function App() {
               )}
 
               {/* Shared Routes */}
-              <Route path="/dashboard" element={<DashboardPage user={user} />} />
+              <Route path="/dashboard" element={<Navigate replace to={isAdmin ? '/admin/dashboard' : isStudent ? '/student/dashboard' : '/'} />} />
               <Route path="/assignments" element={<AssignmentsPage user={user} />} />
               <Route path="/resources" element={<ResourcesPage user={user} />} />
               <Route path="/payments" element={<PaymentsPage user={user} />} />
-              <Route path="/maps" element={<MapsPage user={user} />} />
+              <Route path="/maps" element={<MapsPage />} />
               <Route path="/debug" element={<DebugPage />} />
 
-              {/* Default redirect based on role */}
-              <Route
-                path="/"
-                element={
-                  isAdminUser() ? (
-                    <AdminDashboardPage user={user} />
-                  ) : isStudentUser() ? (
-                    <StudentDashboardPage user={user} />
-                  ) : (
-                    <DashboardPage user={user} />
-                  )
-                }
-              />
-
-              {/* Catch-all: redirect to appropriate dashboard */}
-              <Route
-                path="*"
-                element={
-                  isAdminUser() ? (
-                    <AdminDashboardPage user={user} />
-                  ) : isStudentUser() ? (
-                    <StudentDashboardPage user={user} />
-                  ) : (
-                    <DashboardPage user={user} />
-                  )
-                }
-              />
+              <Route path="/" element={<Navigate replace to={isAdmin ? '/admin/dashboard' : isStudent ? '/student/dashboard' : '/login'} />} />
+              <Route path="*" element={<Navigate replace to={isAdmin ? '/admin/dashboard' : isStudent ? '/student/dashboard' : '/login'} />} />
             </Routes>
           </main>
         </div>

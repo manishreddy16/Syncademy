@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getUserBalance, deductMoney, recordOfflinePayment, getUserTransactions } from '../services/payment';
+import { getUserBalance, deductMoney, recordOfflinePayment, getUserTransactions, getAllPaymentHistory } from '../services/payment';
 import { getOnlineStatus, subscribeToOnlineStatus } from '../utils/onlineStatus';
 import { getCurrentUser, isAdminUser } from '../utils/auth';
 
@@ -24,11 +24,15 @@ const PaymentsPage = ({ user }: PaymentsPageProps) => {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const userBalance = await getUserBalance(user.uid);
-        setBalance(userBalance);
-
-        const userTransactions = await getUserTransactions(user.uid);
-        setTransactions(userTransactions);
+        if (!isAdminUser()) {
+          const userBalance = await getUserBalance(user.uid);
+          setBalance(userBalance);
+          const userTransactions = await getUserTransactions(user.uid);
+          setTransactions(userTransactions);
+        } else {
+          const history = await getAllPaymentHistory(user.schoolId);
+          setTransactions(history);
+        }
       } catch (error) {
         console.error('Error loading payment data:', error);
         setFeedback({ type: 'error', message: 'Unable to load payment data' });
@@ -38,7 +42,7 @@ const PaymentsPage = ({ user }: PaymentsPageProps) => {
     loadData();
     const interval = setInterval(loadData, 30000); // Refresh every 30 seconds
     return () => clearInterval(interval);
-  }, [user.uid]);
+  }, [user.uid, user.schoolId]);
 
   const handlePayment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,8 +95,12 @@ const PaymentsPage = ({ user }: PaymentsPageProps) => {
             <h2 className="mt-3 text-3xl font-semibold text-white">Manage your payments</h2>
           </div>
           <div className="rounded-3xl bg-slate-950/80 px-6 py-4 text-slate-200 shadow-soft">
-            <p className="text-sm text-slate-400">Available Balance</p>
-            <p className="mt-2 text-2xl font-semibold text-indigo-400">{balance.toLocaleString()} units</p>
+            <p className="text-sm text-slate-400">{isAdminUser() ? 'Payment history' : 'Available Balance'}</p>
+            {!isAdminUser() ? (
+              <p className="mt-2 text-2xl font-semibold text-indigo-400">{balance.toLocaleString()} units</p>
+            ) : (
+              <p className="mt-2 text-2xl font-semibold text-white">School payment ledger</p>
+            )}
             <p className={`text-xs mt-1 ${isOnline ? 'text-green-400' : 'text-amber-400'}`}>
               {isOnline ? '🟢 Online' : '🔴 Offline Mode'}
             </p>

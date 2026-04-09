@@ -199,14 +199,14 @@ const ResourcesPage = ({ user }: ResourcesPageProps) => {
 
             <button
               type="submit"
-              disabled={!selectedFile || uploading || !isOnline}
+              disabled={!selectedFile || uploading}
               className="px-6 py-3 rounded-2xl bg-indigo-600 text-white font-semibold hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {uploading ? 'Uploading...' : 'Upload Resource'}
             </button>
 
             {!isOnline && (
-              <p className="text-sm text-yellow-300">⚠️ Will upload when you're back online</p>
+              <p className="text-sm text-yellow-300">⚠️ Resource will be saved locally and uploaded when online.</p>
             )}
 
             {feedback.message && (

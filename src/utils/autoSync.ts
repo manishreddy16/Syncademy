@@ -3,20 +3,8 @@
 
 import { syncPending, getPendingSyncs, markAsSynced } from './offlineStorage';
 import { subscribeToOnlineStatus } from './onlineStatus';
-import { auth, db } from '../firebase';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-  addDoc,
-  setDoc,
-  doc,
-  getDoc,
-  serverTimestamp,
-  runTransaction,
-} from 'firebase/firestore';
+import { db } from '../firebase';
+import { collection, query, where, getDocs, addDoc, doc, getDoc, serverTimestamp, runTransaction } from 'firebase/firestore';
 import { syncOfflineResource } from '../services/resources';
 
 const registrationRequestsCollection = collection(db, 'registrationRequests');
@@ -33,8 +21,8 @@ export const initAutoSync = (): void => {
 
 export const syncPendingData = async (): Promise<void> => {
   if (isSyncing) return;
-
   isSyncing = true;
+
   try {
     const pendingSyncs = await getPendingSyncs();
     console.log(`Syncing ${pendingSyncs.length} pending items...`);

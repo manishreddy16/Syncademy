@@ -1,4 +1,4 @@
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { auth, db } from '../firebase';
 import {
   addDoc,
@@ -13,7 +13,6 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { setAuth } from '../utils/auth';
 import { getOnlineStatus } from '../utils/onlineStatus';
 import { savePending } from '../utils/offlineStorage';
@@ -116,6 +115,25 @@ export const authLogin = async (payload: { email: string; password: string }) =>
   if (userData.role === 'student' && userData.approved === false) {
     throw new Error('Your student account is pending approval.');
   }
+  const user = { uid: userCredential.user.uid, ...userData } as UserProfile;
+  setAuth(user);
+  return user;
+};
+
+export const googleSignIn = async () => {
+  const provider = new GoogleAuthProvider();
+  const userCredential = await signInWithPopup(auth, provider);
+
+  const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+  if (!userDoc.exists()) {
+    throw new Error('User profile not found. Please contact your administrator.');
+  }
+
+  const userData = userDoc.data() as UserProfile;
+  if (userData.role === 'student' && userData.approved === false) {
+    throw new Error('Your student account is pending approval.');
+  }
+
   const user = { uid: userCredential.user.uid, ...userData } as UserProfile;
   setAuth(user);
   return user;

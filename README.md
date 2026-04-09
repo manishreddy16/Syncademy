@@ -1,17 +1,17 @@
 # Syncademy
 
 Syncademy has been fully migrated to a Firebase-first frontend application.
-The old Node.js / PostgreSQL backend has been removed, and the app now uses Firebase Auth and Firestore for school registration, student onboarding, assignments, resources, and payments.
+The app now uses Firebase Authentication and Firestore for user management, registrations, assignments, resources, payments, and offline sync.
 
 ## What is included
 
 - React + Vite frontend with Tailwind CSS
-- Firebase Auth for login and registration
-- Firestore for school, user, assignment, resource, and payment data
-- Admin / Student role support
-- School ID generation: `SCH-XXXX`
-- Clean modern UI with loading and success/error states
-- Fully working login and registration flows
+- Firebase Auth for email/password login and Google Sign-In
+- Firestore for schools, users, assignments, resources, submissions, registrations, and payments
+- Admin and Student portals with separate dashboards and role-based navigation
+- Offline-first queueing for assignments, resources, payments, and registration requests
+- Automatic sync of pending tasks when online is restored
+- Map integration and current location display for students
 
 ## Quick Start
 
@@ -30,32 +30,24 @@ Open the app at: `http://localhost:5173`
 
 ## Firebase Setup
 
-The app already includes `src/firebase.ts` with Firebase configuration.
+The app includes `src/firebase.ts` with Firebase configuration.
 If you want to use your own Firebase project, update the values in `src/firebase.ts`.
 
 ## Page flow
 
-- `/login` - Login with email and password
-- `/register-school` - Register school admin and generate School ID
-- `/register-student` - Register student using School ID
-- `/dashboard` - Overview for admin or student
-- `/assignments` - Assignment management
-- `/resources` - Resource sharing and offline download
-- `/payments` - Payment tracking
-- `/maps` - Location-aware map view
+- `/login` - Login with email/password or Google
+- `/register-school` - Register a school admin and generate a School ID
+- `/register-student` - Create a student registration request for admin approval
+- `/admin/dashboard` - Admin portal for approvals, assignments, resources, and payments
+- `/student/dashboard` - Student portal with balance, submissions, and map
+- `/assignments` - Assignment creation and student submissions
+- `/resources` - Resource upload, download, and offline caching
+- `/payments` - View student payment history and create payment requests
+- `/maps` - Current location map view
 
-## Sample test accounts
+## Sample test credentials
 
-Use the frontend registration forms to create these accounts, then log in:
-
-- Admin:
-  - Email: `admin@test.com`
-  - Password: `123456`
-
-- Student:
-  - Email: `student@test.com`
-  - Password: `123456`
-  - School ID: use the generated `SCH-XXXX` code shown after admin registration
+For example test accounts, see `SAMPLE_CREDENTIALS.md`.
 
 ## Available scripts
 
@@ -67,57 +59,24 @@ npm run preview
 
 ## Project structure
 
-- `src/firebase.ts` - Firebase initialization
-- `src/services/api.ts` - Firebase Auth and Firestore service functions
-- `src/utils/auth.ts` - Local auth state helpers
-- `src/pages/` - App views and forms
+- `src/firebase.ts` - Firebase initialization and offline persistence
+- `src/services/api.ts` - Auth and registration service functions
+- `src/services/payment.ts` - Payment and balance logic
+- `src/services/assignments.ts` - Assignment and submission logic
+- `src/services/resources.ts` - Resource upload and sync logic
+- `src/utils/auth.ts` - Local auth session helpers
+- `src/utils/offlineStorage.ts` - Offline queue and local storage helpers
+- `src/utils/autoSync.ts` - Automatic sync on reconnect
+- `src/pages/` - App page components
 - `src/components/` - Shared UI components
 
 ## Status
 
-✅ **Firebase migration complete**
-✅ **Backend removed**
-✅ **App builds successfully**
-✅ **No legacy PostgreSQL or Express dependencies remain**
-
-## Notes
-
-- The `backend/` folder has been deleted.
-- The `package.json` no longer includes backend or PostgreSQL dependencies.
-- The app is ready for a hackathon demo with Firebase Auth + Firestore.
-psql -d syncademy -f backend/seed.sql
-```
-
-4. Install dependencies:
-
-```bash
-npm install
-```
-
-## Running locally
-
-Start the development servers together:
-
-```bash
-npm run dev
-```
-
-- Frontend: `http://localhost:5173`
-- Backend API: `http://localhost:4000/api`
-
-## Available backend endpoints
-
-- `POST /api/auth/register-school`
-- `POST /api/auth/register-student`
-- `POST /api/auth/login`
-- `GET /api/dashboard`
-- `GET /api/assignments`
-- `POST /api/assignments`
-- `POST /api/assignments/submissions`
-- `GET /api/resources`
-- `POST /api/resources`
-- `GET /api/payments`
-- `POST /api/payments`
+✅ Firebase Auth and Firestore are fully integrated
+✅ Offline queueing and sync supported for assignments, resources, payments, and registrations
+✅ Separate admin and student portal workflows enforced
+✅ Maps and current location display available
+✅ The project builds successfully with `npm run build`
 - `GET /api/students/pending`
 - `PATCH /api/students/:id/approval`
 
