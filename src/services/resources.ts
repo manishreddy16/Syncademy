@@ -13,7 +13,7 @@ import {
   serverTimestamp,
   setDoc,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getBytes, deleteObject, getStorage } from 'firebase/storage';
+import { ref, uploadBytes, getBytes, deleteObject, getStorage, getDownloadURL } from 'firebase/storage';
 import { getOfflineItemsByPrefix, setOfflineItem, removeOfflineItem, savePending } from '../utils/offlineStorage';
 
 const resourcesCollection = collection(db, 'resources');
@@ -62,11 +62,22 @@ export const uploadResource = async (
   file: File,
   schoolId: string,
   uid: string,
-  description: string = ''
+  description: string = '',
+  onProgress?: (progress: number) => void
 ): Promise<Resource> => {
   try {
+    // Validate file type and size
+    if (file.type !== 'application/pdf') {
+      throw new Error('Only PDF files are allowed');
+    }
+
+    if (file.size > 10 * 1024 * 1024) { // 10MB limit
+      throw new Error('File size must be less than 10MB');
+    }
+
     const storageRef = ref(storage, `resources/${schoolId}/${uid}/${Date.now()}_${file.name}`);
     const snapshot = await uploadBytes(storageRef, file);
+    const downloadURL = await getDownloadURL(snapshot.ref);
 
     const resource: Resource = {
       name: file.name,
@@ -76,11 +87,18 @@ export const uploadResource = async (
       uploadedBy: uid,
       uploadedAt: Date.now(),
       schoolId,
-      url: snapshot.ref.fullPath,
+      url: downloadURL,
+      synced: true,
     };
 
     const docRef = await addDoc(resourcesCollection, {
-      ...resource,
+      fileName: file.name,
+      downloadURL,
+      uploadedBy: uid,
+      schoolId,
+      fileSize: file.size,
+      fileType: file.type,
+      description,
       createdAt: serverTimestamp(),
     });
 
@@ -100,6 +118,15 @@ export const uploadResourceOffline = async (
   uid: string,
   description: string = ''
 ): Promise<void> => {
+  // Validate file type and size
+  if (file.type !== 'application/pdf') {
+    throw new Error('Only PDF files are allowed');
+  }
+
+  if (file.size > 10 * 1024 * 1024) { // 10MB limit
+    throw new Error('File size must be less than 10MB');
+  }
+
   const key = `resource_${uid}_${Date.now()}`;
   const base64 = await blobToBase64(file);
   const resource: Resource = {
@@ -117,7 +144,15 @@ export const uploadResourceOffline = async (
 
   await setOfflineItem(key, resource, true);
   await savePending('resources', {
-    ...resource,
+    fileName: file.name,
+    downloadURL: '', // Will be set when synced
+    uploadedBy: uid,
+    schoolId,
+    fileSize: file.size,
+    fileType: file.type,
+    description,
+    base64Data: base64,
+    offlineKey: key,
     key,
   });
 };
@@ -151,7 +186,21 @@ export const getSchoolResources = async (schoolId: string): Promise<Resource[]> 
     const snapshot = await getDocs(q);
 
     const onlineResources = snapshot.docs
-      .map((docItem) => ({ id: docItem.id, ...docItem.data() } as Resource))
+      .map((docItem) => {
+        const data = docItem.data();
+        return {
+          id: docItem.id,
+          name: data.fileName,
+          description: data.description || '',
+          fileSize: data.fileSize,
+          fileType: data.fileType,
+          uploadedBy: data.uploadedBy,
+          uploadedAt: data.createdAt?.toMillis() || Date.now(),
+          schoolId: data.schoolId,
+          url: data.downloadURL,
+          synced: true,
+        } as Resource;
+      })
       .sort((a, b) => (b.uploadedAt || 0) - (a.uploadedAt || 0));
 
     const offlineResources = (await getOfflineItemsByPrefix('resource_'))
@@ -172,32 +221,43 @@ export const getSchoolResources = async (schoolId: string): Promise<Resource[]> 
   }
 };
 
-export const syncOfflineResource = async (resourceData: Resource): Promise<void> => {
+export const syncOfflineResource = async (resourceData: any): Promise<void> => {
   try {
     const blob = base64ToBlob(resourceData.base64Data || '');
-    const storageRef = ref(storage, `resources/${resourceData.schoolId}/${resourceData.uploadedBy}/${Date.now()}_${resourceData.name}`);
+    const storageRef = ref(storage, `resources/${resourceData.schoolId}/${resourceData.uploadedBy}/${Date.now()}_${resourceData.fileName || resourceData.name}`);
     await uploadBytes(storageRef, blob);
+    const downloadURL = await getDownloadURL(storageRef);
 
     await addDoc(resourcesCollection, {
+      fileName: resourceData.fileName || resourceData.name,
+      downloadURL,
+      uploadedBy: resourceData.uploadedBy,
       schoolId: resourceData.schoolId,
-      name: resourceData.name,
-      description: resourceData.description || '',
       fileSize: resourceData.fileSize,
       fileType: resourceData.fileType,
-      uploadedBy: resourceData.uploadedBy,
-      uploadedAt: Date.now(),
-      url: storageRef.fullPath,
-      synced: true,
-      offlineKey: resourceData.offlineKey,
+      description: resourceData.description || '',
       createdAt: serverTimestamp(),
     });
 
-    if (resourceData.offlineKey) {
-      await removeOfflineItem(resourceData.offlineKey);
+    if (resourceData.offlineKey || resourceData.key) {
+      await removeOfflineItem(resourceData.offlineKey || resourceData.key);
     }
   } catch (error) {
     console.error('Error syncing offline resource:', error);
     throw error;
+  }
+};
+
+export const getPendingUploads = async (schoolId: string): Promise<any[]> => {
+  try {
+    const pendingItems = await getOfflineItemsByPrefix('resource_');
+    return pendingItems
+      .map((item) => item.value)
+      .filter((resource: any) => resource.schoolId === schoolId && !resource.synced)
+      .sort((a, b) => (b.uploadedAt || 0) - (a.uploadedAt || 0));
+  } catch (error) {
+    console.error('Error getting pending uploads:', error);
+    return [];
   }
 };
 

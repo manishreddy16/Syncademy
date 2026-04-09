@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { getSchoolResources } from '../services/resources';
 import { getSchoolAssignments, getSchoolSubmissions } from '../services/assignments';
 import { getOnlineStatus, subscribeToOnlineStatus } from '../utils/onlineStatus';
-import { fetchPendingStudents, approveStudent } from '../services/api';
+import { fetchPendingStudents, approveStudent, fetchDashboard } from '../services/api';
 import PendingTasksSection from '../components/PendingTasksSection';
 
 interface AdminDashboardPageProps {
@@ -25,6 +25,9 @@ const AdminDashboardPage = ({ user }: AdminDashboardPageProps) => {
 
   const loadData = async () => {
     try {
+      const dashboardData = await fetchDashboard(user);
+      setStudentCount(dashboardData.approvedStudents);
+
       const pending = await fetchPendingStudents(user);
       setPendingStudents(pending);
 
@@ -33,8 +36,6 @@ const AdminDashboardPage = ({ user }: AdminDashboardPageProps) => {
 
       const schoolAssignments = await getSchoolAssignments(user.schoolId);
       setAssignments(schoolAssignments);
-
-      setStudentCount(pending.length); // Approximate, or calculate from history
 
       const schoolSubmissions = await getSchoolSubmissions(user.schoolId);
       setRecentSubmissions(schoolSubmissions.slice(0, 5));
