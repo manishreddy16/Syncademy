@@ -19,6 +19,7 @@ import PaymentsPage from './pages/PaymentsPage';
 import MapsPage from './pages/MapsPage';
 import DebugPage from './pages/DebugPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
+import AdminStudentsPage from './pages/AdminStudentsPage';
 import GradesPage from './pages/GradesPage';
 import StudentDashboardPage from './pages/StudentDashboardPage';
 import LandingPage from './pages/LandingPage';
@@ -155,8 +156,7 @@ function App() {
               {isAdmin && (
                 <>
                   <Route path="/admin/dashboard" element={<AdminDashboardPage user={user} />} />
-                  <Route path="/admin/students" element={<AdminDashboardPage user={user} />} />
-                  <Route path="/admin/analytics" element={<AdminDashboardPage user={user} />} />
+                  <Route path="/admin/students" element={<AdminStudentsPage user={user} />} />
                 </>
               )}
 

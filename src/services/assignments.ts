@@ -19,6 +19,14 @@ const assignmentsCollection = collection(db, 'assignments');
 const submissionsCollection = collection(db, 'submissions');
 const usersCollection = collection(db, 'users');
 
+export interface Question {
+  id: string;
+  text: string;
+  type: 'multiple-choice' | 'text' | 'true-false';
+  options?: string[]; // For multiple choice
+  correctAnswer?: string; // For auto-grading if needed
+}
+
 export interface Assignment {
   id?: string;
   title: string;
@@ -27,6 +35,8 @@ export interface Assignment {
   createdBy: string; // teacher/admin uid
   schoolId: string;
   createdAt?: number;
+  questions?: Question[]; // New: multiple questions
+  type?: 'assignment' | 'quiz'; // New: assignment vs quiz
 }
 
 export interface Submission {
@@ -43,6 +53,8 @@ export interface Submission {
   fileType?: string;
   fileUrl?: string;
   base64Data?: string;
+  answers?: { [questionId: string]: string }; // New: answers to questions
+  studentName?: string; // For admin view
 }
 
 // Create assignment (admin/teacher only)
@@ -132,8 +144,15 @@ export const submitAssignment = async (
   uid: string,
   content: string | null,
   file: File | null = null,
-  schoolId?: string
+  schoolId?: string,
+  answers?: { [questionId: string]: string }
 ): Promise<Submission> => {
+  // Check for duplicate submission
+  const alreadySubmitted = await hasStudentSubmitted(assignmentId, uid);
+  if (alreadySubmitted) {
+    throw new Error('You have already submitted this assignment');
+  }
+
   try {
     const submission: Submission = {
       assignmentId,
@@ -143,6 +162,7 @@ export const submitAssignment = async (
       synced: true,
       status: 'submitted',
       schoolId: schoolId || undefined,
+      answers: answers || {},
     } as Submission;
 
     if (file && schoolId) {
@@ -173,8 +193,15 @@ export const submitAssignmentOffline = async (
   uid: string,
   content: string | null,
   file: File | null = null,
-  schoolId: string
+  schoolId: string,
+  answers?: { [questionId: string]: string }
 ): Promise<void> => {
+  // Check for duplicate submission (only check online, offline pending is OK)
+  const alreadySubmitted = await hasStudentSubmitted(assignmentId, uid);
+  if (alreadySubmitted) {
+    throw new Error('You have already submitted this assignment');
+  }
+
   const key = `assignment_${uid}_${assignmentId}_${Date.now()}`;
   const submission: Submission = {
     assignmentId,
@@ -186,6 +213,7 @@ export const submitAssignmentOffline = async (
     offlineKey: key,
     action: 'submit',
     schoolId,
+    answers: answers || {},
   } as Submission;
 
   if (file) {
@@ -315,6 +343,32 @@ export const getStudentSubmissions = async (uid: string): Promise<Submission[]> 
   } catch (error) {
     console.error('Error getting student submissions:', error);
     return [];
+  }
+};
+
+// Check if student has already submitted an assignment
+export const hasStudentSubmitted = async (assignmentId: string, uid: string): Promise<boolean> => {
+  try {
+    // Check online submissions
+    const q = query(
+      submissionsCollection,
+      where('assignmentId', '==', assignmentId),
+      where('uid', '==', uid)
+    );
+    const snapshot = await getDocs(q);
+    const onlineSubmitted = snapshot.docs.length > 0;
+
+    // Check offline pending submissions
+    const offlineSubmissions = await getPendingItems('assignments');
+    const offlineSubmitted = offlineSubmissions.some(
+      (item) => item.assignmentId === assignmentId && item.uid === uid && item.action === 'submit'
+    );
+
+    return onlineSubmitted || offlineSubmitted;
+  } catch (error) {
+    console.error('Error checking submission status:', error);
+    // If we can't check, assume not submitted to be safe
+    return false;
   }
 };
 

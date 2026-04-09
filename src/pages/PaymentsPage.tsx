@@ -149,10 +149,10 @@ const PaymentsPage = ({ user }: PaymentsPageProps) => {
 
               <button
                 type="submit"
-                disabled={loading || !amount}
+                disabled={loading || !amount || balance <= 0}
                 className="w-full rounded-2xl bg-indigo-600 px-5 py-3 text-white font-semibold hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {loading ? 'Processing...' : 'Pay Now'}
+                {loading ? 'Processing...' : balance <= 0 ? 'Insufficient Balance' : 'Pay Now'}
               </button>
 
               {feedback.message && (
