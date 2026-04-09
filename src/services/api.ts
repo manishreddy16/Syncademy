@@ -14,6 +14,8 @@ import {
   where,
 } from 'firebase/firestore';
 import { setAuth } from '../utils/auth';
+import { getOnlineStatus } from '../utils/onlineStatus';
+import { setOfflineItem } from '../utils/offlineStorage';
 
 type Role = 'admin' | 'student';
 
@@ -71,6 +73,24 @@ export const registerStudent = async (payload: { email: string; name: string; ro
   if (!schoolDoc.exists()) {
     throw new Error('School ID not found. Please check your School ID and try again.');
   }
+
+  if (!getOnlineStatus()) {
+    const offlineKey = `registration_${payload.email}_${Date.now()}`;
+    await setOfflineItem(offlineKey, {
+      ...payload,
+      approved: false,
+      offlineKey,
+      requestedAt: Date.now(),
+    }, true);
+
+    return {
+      email: payload.email,
+      schoolId: payload.schoolId,
+      name: payload.name,
+      offline: true,
+    };
+  }
+
   const userCredential = await createUserWithEmailAndPassword(auth, payload.email, payload.password);
   await setDoc(doc(db, 'users', userCredential.user.uid), {
     email: payload.email,

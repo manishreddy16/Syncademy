@@ -11,9 +11,8 @@ import {
   where,
   updateDoc,
   serverTimestamp,
-  getDoc,
 } from 'firebase/firestore';
-import { setOfflineItem, getOfflineItem } from '../utils/offlineStorage';
+import { setOfflineItem, getPendingSyncsByPrefix } from '../utils/offlineStorage';
 
 const assignmentsCollection = collection(db, 'assignments');
 const submissionsCollection = collection(db, 'submissions');
@@ -37,6 +36,7 @@ export interface Submission {
   synced?: boolean;
   status?: 'pending' | 'submitted' | 'graded';
   grade?: string;
+  offlineKey?: string;
 }
 
 // Create assignment (admin/teacher only)
@@ -114,6 +114,7 @@ export const submitAssignmentOffline = async (
   uid: string,
   content: string
 ): Promise<void> => {
+  const key = `assignment_${uid}_${assignmentId}_${Date.now()}`;
   const submission: Submission = {
     assignmentId,
     uid,
@@ -121,10 +122,10 @@ export const submitAssignmentOffline = async (
     submittedAt: Date.now(),
     synced: false,
     status: 'pending',
+    offlineKey: key,
   };
 
-  const key = `assignment_${uid}_${assignmentId}_${Date.now()}`;
-  await setOfflineItem(key, submission, true); // Mark for sync
+  await setOfflineItem(key, submission, true);
 };
 
 // Get student submissions for an assignment
@@ -148,11 +149,18 @@ export const getStudentSubmissions = async (uid: string): Promise<Submission[]> 
   try {
     const q = query(submissionsCollection, where('uid', '==', uid));
     const snapshot = await getDocs(q);
-
-    return snapshot.docs.map((doc) => ({
+    const onlineSubmissions = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     } as Submission));
+
+    const offlineSubmissions = await getPendingSyncsByPrefix(`assignment_${uid}_`);
+    const pending = offlineSubmissions.map((item) => ({
+      ...item.value,
+      status: 'pending',
+    } as Submission));
+
+    return [...offlineSubmissions.map((item) => item.value as Submission), ...onlineSubmissions];
   } catch (error) {
     console.error('Error getting student submissions:', error);
     return [];

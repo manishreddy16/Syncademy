@@ -1,5 +1,5 @@
 // Resources service
-// Manages PDF uploads, downloads, and offline storage
+// Manages PDF uploads, downloads, offline storage, and sync
 
 import { db } from '../firebase';
 import {
@@ -9,18 +9,16 @@ import {
   getDocs,
   query,
   where,
-  updateDoc,
   deleteDoc,
   serverTimestamp,
-  getDoc,
+  setDoc,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getBytes, deleteObject, getStorage } from 'firebase/storage';
-import { setOfflineItem, getOfflineItem, removeOfflineItem } from '../utils/offlineStorage';
+import { setOfflineItem, removeOfflineItem } from '../utils/offlineStorage';
 
 const resourcesCollection = collection(db, 'resources');
 const storage = getStorage();
 
-// Helper function to convert blob to base64
 const blobToBase64 = (blob: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -28,6 +26,20 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+};
+
+const base64ToBlob = (dataURI: string): Blob => {
+  const [prefix, base64] = dataURI.split(',');
+  const byteString = atob(base64);
+  const mimeString = prefix.split(':')[1].split(';')[0];
+
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  for (let i = 0; i < byteString.length; i += 1) {
+    ia[i] = byteString.charCodeAt(i);
+  }
+
+  return new Blob([ab], { type: mimeString });
 };
 
 export interface Resource {
@@ -41,9 +53,11 @@ export interface Resource {
   schoolId: string;
   url?: string;
   synced?: boolean;
+  base64Data?: string;
+  offline?: boolean;
+  offlineKey?: string;
 }
 
-// Upload PDF resource
 export const uploadResource = async (
   file: File,
   schoolId: string,
@@ -51,11 +65,9 @@ export const uploadResource = async (
   description: string = ''
 ): Promise<Resource> => {
   try {
-    // Upload to Firebase Storage
     const storageRef = ref(storage, `resources/${schoolId}/${uid}/${Date.now()}_${file.name}`);
     const snapshot = await uploadBytes(storageRef, file);
 
-    // Save metadata to Firestore
     const resource: Resource = {
       name: file.name,
       description,
@@ -67,7 +79,10 @@ export const uploadResource = async (
       url: snapshot.ref.fullPath,
     };
 
-    const docRef = await addDoc(resourcesCollection, resource);
+    const docRef = await addDoc(resourcesCollection, {
+      ...resource,
+      createdAt: serverTimestamp(),
+    });
 
     return {
       id: docRef.id,
@@ -79,15 +94,14 @@ export const uploadResource = async (
   }
 };
 
-// Upload PDF resource offline (store locally and sync later)
 export const uploadResourceOffline = async (
   file: File,
   schoolId: string,
   uid: string,
   description: string = ''
 ): Promise<void> => {
+  const key = `resource_${uid}_${Date.now()}`;
   const base64 = await blobToBase64(file);
-  
   const resource: Resource = {
     name: file.name,
     description,
@@ -98,13 +112,12 @@ export const uploadResourceOffline = async (
     schoolId,
     synced: false,
     base64Data: base64,
+    offlineKey: key,
   };
 
-  const key = `resource_${uid}_${Date.now()}`;
-  await setOfflineItem(key, resource, true); // Mark for sync
+  await setOfflineItem(key, resource, true);
 };
 
-// Download resource for offline use
 export const downloadResourceForOffline = async (resourceId: string, resource: Resource): Promise<void> => {
   try {
     if (!resource.url) {
@@ -113,13 +126,10 @@ export const downloadResourceForOffline = async (resourceId: string, resource: R
 
     const storageRef = ref(storage, resource.url);
     const fileBytes = await getBytes(storageRef);
+    const fileBlob = new Blob([fileBytes], { type: resource.fileType });
+    const base64 = await blobToBase64(fileBlob);
 
-    // Store in offline storage
-    const key = `resource_${resourceId}`;
-    const blob = new Blob([fileBytes], { type: resource.fileType });
-    const base64 = await blobToBase64(blob);
-
-    await setOfflineItem(key, {
+    await setOfflineItem(`resource_${resourceId}`, {
       ...resource,
       base64Data: base64,
       downloadedAt: Date.now(),
@@ -131,51 +141,58 @@ export const downloadResourceForOffline = async (resourceId: string, resource: R
   }
 };
 
-// Get all resources for a school
 export const getSchoolResources = async (schoolId: string): Promise<Resource[]> => {
   try {
     const q = query(resourcesCollection, where('schoolId', '==', schoolId));
     const snapshot = await getDocs(q);
 
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    } as Resource));
+    return snapshot.docs
+      .map((docItem) => ({ id: docItem.id, ...docItem.data() } as Resource))
+      .sort((a, b) => (b.uploadedAt || 0) - (a.uploadedAt || 0));
   } catch (error) {
     console.error('Error getting resources:', error);
     return [];
   }
 };
 
-// Get offline resources
-export const getOfflineResources = async (schoolId: string): Promise<Resource[]> => {
+export const syncOfflineResource = async (resourceData: Resource): Promise<void> => {
   try {
-    // Get all offline resources
-    const offlineResources: Resource[] = [];
-    
-    // This is a simplified approach - in production, you might want to store a list
-    // For now, we'll just return what's requested
-    
-    return offlineResources;
+    const blob = base64ToBlob(resourceData.base64Data || '');
+    const storageRef = ref(storage, `resources/${resourceData.schoolId}/${resourceData.uploadedBy}/${Date.now()}_${resourceData.name}`);
+    await uploadBytes(storageRef, blob);
+
+    await addDoc(resourcesCollection, {
+      schoolId: resourceData.schoolId,
+      name: resourceData.name,
+      description: resourceData.description || '',
+      fileSize: resourceData.fileSize,
+      fileType: resourceData.fileType,
+      uploadedBy: resourceData.uploadedBy,
+      uploadedAt: Date.now(),
+      url: storageRef.fullPath,
+      synced: true,
+      offlineKey: resourceData.offlineKey,
+      createdAt: serverTimestamp(),
+    });
+
+    if (resourceData.offlineKey) {
+      await removeOfflineItem(resourceData.offlineKey);
+    }
   } catch (error) {
-    console.error('Error getting offline resources:', error);
-    return [];
+    console.error('Error syncing offline resource:', error);
+    throw error;
   }
 };
 
-// Delete resource
 export const deleteResource = async (resourceId: string, url: string): Promise<void> => {
   try {
-    // Delete from Firestore
     await deleteDoc(doc(resourcesCollection, resourceId));
 
-    // Delete from Storage
     if (url) {
       const storageRef = ref(storage, url);
       await deleteObject(storageRef);
     }
 
-    // Delete offline copy
     await removeOfflineItem(`resource_${resourceId}`);
   } catch (error) {
     console.error('Error deleting resource:', error);

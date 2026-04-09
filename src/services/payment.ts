@@ -13,6 +13,7 @@ import {
   where,
   serverTimestamp,
   addDoc,
+  runTransaction,
 } from 'firebase/firestore';
 import { setOfflineItem, getOfflineItem } from '../utils/offlineStorage';
 
@@ -34,6 +35,7 @@ export interface Transaction {
   description: string;
   timestamp: number;
   synced?: boolean;
+  offlineKey?: string;
 }
 
 // Get user balance
@@ -75,33 +77,36 @@ export const initializeUserBalance = async (uid: string): Promise<void> => {
 // Deduct money from user (for payments)
 export const deductMoney = async (uid: string, amount: number, description: string): Promise<boolean> => {
   try {
-    const currentBalance = await getUserBalance(uid);
-
-    if (currentBalance < amount) {
-      throw new Error('Insufficient balance');
-    }
-
-    const newBalance = currentBalance - amount;
     const userRef = doc(usersCollection, uid);
+    let newBalance: number;
 
-    await updateDoc(userRef, {
-      balance: newBalance,
-      lastUpdated: serverTimestamp(),
+    await runTransaction(db, async (transaction) => {
+      const userDoc = await transaction.get(userRef);
+      const currentBalance = userDoc.exists() ? userDoc.data()?.balance || INITIAL_BALANCE : INITIAL_BALANCE;
+
+      if (currentBalance < amount) {
+        throw new Error('Insufficient balance');
+      }
+
+      newBalance = currentBalance - amount;
+      transaction.update(userRef, {
+        balance: newBalance,
+        lastUpdated: serverTimestamp(),
+      });
     });
 
-    // Record transaction
-    const transaction: Transaction = {
+    const transactionRecord: Transaction = {
       uid,
       type: 'debit',
       amount,
       description,
       timestamp: Date.now(),
+      synced: true,
+      offlineKey: `payment_${uid}_${Date.now()}`,
     };
 
-    await addDoc(transactionsCollection, transaction);
-
-    // Cache locally
-    await setOfflineItem(`balance_${uid}`, newBalance);
+    await addDoc(transactionsCollection, transactionRecord);
+    await setOfflineItem(`balance_${uid}`, newBalance!);
 
     return true;
   } catch (error) {
@@ -113,28 +118,32 @@ export const deductMoney = async (uid: string, amount: number, description: stri
 // Add money to user (admin operation)
 export const addMoney = async (uid: string, amount: number, description: string): Promise<void> => {
   try {
-    const currentBalance = await getUserBalance(uid);
-    const newBalance = currentBalance + amount;
     const userRef = doc(usersCollection, uid);
+    let newBalance: number;
 
-    await updateDoc(userRef, {
-      balance: newBalance,
-      lastUpdated: serverTimestamp(),
+    await runTransaction(db, async (transaction) => {
+      const userDoc = await transaction.get(userRef);
+      const currentBalance = userDoc.exists() ? userDoc.data()?.balance || INITIAL_BALANCE : INITIAL_BALANCE;
+      newBalance = currentBalance + amount;
+
+      transaction.update(userRef, {
+        balance: newBalance,
+        lastUpdated: serverTimestamp(),
+      });
     });
 
-    // Record transaction
-    const transaction: Transaction = {
+    const transactionRecord: Transaction = {
       uid,
       type: 'credit',
       amount,
       description,
       timestamp: Date.now(),
+      synced: true,
+      offlineKey: `credit_${uid}_${Date.now()}`,
     };
 
-    await addDoc(transactionsCollection, transaction);
-
-    // Cache locally
-    await setOfflineItem(`balance_${uid}`, newBalance);
+    await addDoc(transactionsCollection, transactionRecord);
+    await setOfflineItem(`balance_${uid}`, newBalance!);
   } catch (error) {
     console.error('Error adding money:', error);
     throw error;
@@ -271,6 +280,7 @@ export const getAllPaymentHistory = async (schoolId: string, limit: number = 100
 
 // Record offline payment (for when user is offline)
 export const recordOfflinePayment = async (uid: string, amount: number, description: string): Promise<void> => {
+  const key = `payment_${uid}_${Date.now()}`;
   const transaction: Transaction = {
     uid,
     type: 'debit',
@@ -278,13 +288,12 @@ export const recordOfflinePayment = async (uid: string, amount: number, descript
     description,
     timestamp: Date.now(),
     synced: false,
+    offlineKey: key,
   };
 
-  const key = `payment_${uid}_${Date.now()}`;
   await setOfflineItem(key, transaction, true);
 
-  // Update local balance
-  const currentBalance = await getOfflineItem(`balance_${uid}`) || INITIAL_BALANCE;
+  const currentBalance = (await getOfflineItem(`balance_${uid}`)) ?? INITIAL_BALANCE;
   const newBalance = currentBalance - amount;
   await setOfflineItem(`balance_${uid}`, newBalance);
 };

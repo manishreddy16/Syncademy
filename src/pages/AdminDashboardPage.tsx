@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { getAllPaymentHistory, bulkAddMoneyToStudents } from '../services/payment';
+import { getAllPaymentHistory, bulkAddMoneyToStudents, getAllStudentBalances } from '../services/payment';
 import { getSchoolResources } from '../services/resources';
-import { getSchoolAssignments, getAssignmentSubmissions } from '../services/assignments';
+import { getSchoolAssignments } from '../services/assignments';
 import { getOnlineStatus, subscribeToOnlineStatus } from '../utils/onlineStatus';
 import { fetchPendingStudents, approveStudent } from '../services/api';
 
@@ -14,6 +14,7 @@ const AdminDashboardPage = ({ user }: AdminDashboardPageProps) => {
   const [pendingStudents, setPendingStudents] = useState<any[]>([]);
   const [resources, setResources] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
+  const [studentCount, setStudentCount] = useState(0);
   const [isOnline, setIsOnline] = useState(getOnlineStatus());
   const [loading, setLoading] = useState(true);
   const [bulkAddAmount, setBulkAddAmount] = useState(1000);
@@ -38,6 +39,9 @@ const AdminDashboardPage = ({ user }: AdminDashboardPageProps) => {
 
         const schoolAssignments = await getSchoolAssignments(user.schoolId);
         setAssignments(schoolAssignments);
+
+        const studentBalances = await getAllStudentBalances(user.schoolId);
+        setStudentCount(studentBalances.length);
       } catch (error) {
         console.error('Error loading admin dashboard:', error);
       } finally {
@@ -105,7 +109,7 @@ const AdminDashboardPage = ({ user }: AdminDashboardPageProps) => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-6">
           <p className="text-slate-400 text-sm font-medium">Total Students</p>
-          <p className="text-3xl font-bold text-white mt-2">{paymentHistory.length > 0 ? 'Active' : '0'}</p>
+          <p className="text-3xl font-bold text-white mt-2">{studentCount}</p>
         </div>
         <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-6">
           <p className="text-slate-400 text-sm font-medium">Pending Approvals</p>
