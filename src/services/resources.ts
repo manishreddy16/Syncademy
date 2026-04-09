@@ -14,7 +14,7 @@ import {
   setDoc,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getBytes, deleteObject, getStorage } from 'firebase/storage';
-import { setOfflineItem, removeOfflineItem } from '../utils/offlineStorage';
+import { setOfflineItem, removeOfflineItem, savePending } from '../utils/offlineStorage';
 
 const resourcesCollection = collection(db, 'resources');
 const storage = getStorage();
@@ -116,6 +116,10 @@ export const uploadResourceOffline = async (
   };
 
   await setOfflineItem(key, resource, true);
+  await savePending('resources', {
+    ...resource,
+    key,
+  });
 };
 
 export const downloadResourceForOffline = async (resourceId: string, resource: Resource): Promise<void> => {

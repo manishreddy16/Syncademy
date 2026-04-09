@@ -179,6 +179,42 @@ export const getOfflineItemsByPrefix = async (prefix: string): Promise<StorageIt
   }
 };
 
+const getPendingStorageKey = (type: string): string => `pending_${type}`;
+
+export const savePending = async (type: string, value: any): Promise<void> => {
+  const key = getPendingStorageKey(type);
+  const stored = localStorage.getItem(key);
+  const existing = stored ? JSON.parse(stored) : [];
+  existing.push(value);
+  localStorage.setItem(key, JSON.stringify(existing));
+};
+
+export const getPendingItems = async (type: string): Promise<any[]> => {
+  const key = getPendingStorageKey(type);
+  const stored = localStorage.getItem(key);
+  return stored ? JSON.parse(stored) : [];
+};
+
+export const removePendingItem = async (type: string, itemKey: string): Promise<void> => {
+  const key = getPendingStorageKey(type);
+  const stored = localStorage.getItem(key);
+  if (!stored) return;
+  const existing = JSON.parse(stored).filter((item: any) => item.key !== itemKey && item.offlineKey !== itemKey);
+  localStorage.setItem(key, JSON.stringify(existing));
+};
+
+export const syncPending = async (type: string, handler: (item: any) => Promise<void>): Promise<void> => {
+  const pending = await getPendingItems(type);
+  for (const item of pending) {
+    try {
+      await handler(item);
+      await removePendingItem(type, item.key || item.offlineKey || JSON.stringify(item));
+    } catch (error) {
+      console.warn(`Failed to sync pending ${type} item:`, error);
+    }
+  }
+};
+
 // Mark item as synced
 export const markAsSynced = async (key: string): Promise<void> => {
   if (!db) {

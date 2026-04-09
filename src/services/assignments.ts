@@ -12,7 +12,7 @@ import {
   updateDoc,
   serverTimestamp,
 } from 'firebase/firestore';
-import { setOfflineItem, getPendingSyncsByPrefix } from '../utils/offlineStorage';
+import { setOfflineItem, getPendingSyncsByPrefix, savePending, getPendingItems } from '../utils/offlineStorage';
 
 const assignmentsCollection = collection(db, 'assignments');
 const submissionsCollection = collection(db, 'submissions');
@@ -126,6 +126,10 @@ export const submitAssignmentOffline = async (
   };
 
   await setOfflineItem(key, submission, true);
+  await savePending('assignments', {
+    ...submission,
+    key,
+  });
 };
 
 // Get student submissions for an assignment
@@ -154,13 +158,15 @@ export const getStudentSubmissions = async (uid: string): Promise<Submission[]> 
       ...doc.data(),
     } as Submission));
 
-    const offlineSubmissions = await getPendingSyncsByPrefix(`assignment_${uid}_`);
-    const pending = offlineSubmissions.map((item) => ({
-      ...item.value,
-      status: 'pending',
-    } as Submission));
+    const offlineSubmissions = await getPendingItems('assignments');
+    const pending = offlineSubmissions
+      .filter((item) => item.uid === uid)
+      .map((item) => ({
+        ...item,
+        status: 'pending',
+      } as Submission));
 
-    return [...offlineSubmissions.map((item) => item.value as Submission), ...onlineSubmissions];
+    return [...pending, ...onlineSubmissions];
   } catch (error) {
     console.error('Error getting student submissions:', error);
     return [];

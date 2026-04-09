@@ -11,14 +11,15 @@ import {
   getDocs,
   query,
   where,
+  orderBy,
   serverTimestamp,
   addDoc,
   runTransaction,
 } from 'firebase/firestore';
-import { setOfflineItem, getOfflineItem } from '../utils/offlineStorage';
+import { setOfflineItem, getOfflineItem, savePending, getPendingItems } from '../utils/offlineStorage';
 
 const INITIAL_BALANCE = 50000; // Default balance for all users
-const transactionsCollection = collection(db, 'transactions');
+const paymentsCollection = collection(db, 'payments');
 const usersCollection = collection(db, 'users');
 
 export interface UserBalance {
@@ -95,17 +96,20 @@ export const deductMoney = async (uid: string, amount: number, description: stri
       });
     });
 
-    const transactionRecord: Transaction = {
-      uid,
-      type: 'debit',
-      amount,
+    const offlineKey = `payment_${uid}_${Date.now()}`;
+    await addDoc(paymentsCollection, {
+      studentId: uid,
+      schoolId: (await getDoc(userRef)).data()?.schoolId || '',
+      paidTo: 'school',
+      amount: amount,
+      amountPaid: amount,
       description,
+      type: 'debit',
       timestamp: Date.now(),
+      status: 'completed',
       synced: true,
-      offlineKey: `payment_${uid}_${Date.now()}`,
-    };
-
-    await addDoc(transactionsCollection, transactionRecord);
+      offlineKey,
+    });
     await setOfflineItem(`balance_${uid}`, newBalance!);
 
     return true;
@@ -120,9 +124,11 @@ export const addMoney = async (uid: string, amount: number, description: string)
   try {
     const userRef = doc(usersCollection, uid);
     let newBalance: number;
+    let schoolId = '';
 
     await runTransaction(db, async (transaction) => {
       const userDoc = await transaction.get(userRef);
+      schoolId = userDoc.exists() ? userDoc.data()?.schoolId || '' : '';
       const currentBalance = userDoc.exists() ? userDoc.data()?.balance || INITIAL_BALANCE : INITIAL_BALANCE;
       newBalance = currentBalance + amount;
 
@@ -132,17 +138,20 @@ export const addMoney = async (uid: string, amount: number, description: string)
       });
     });
 
-    const transactionRecord: Transaction = {
-      uid,
-      type: 'credit',
+    const offlineKey = `credit_${uid}_${Date.now()}`;
+    await addDoc(paymentsCollection, {
+      studentId: uid,
+      schoolId,
+      paidTo: 'school',
       amount,
+      amountPaid: amount,
       description,
+      type: 'credit',
       timestamp: Date.now(),
+      status: 'completed',
       synced: true,
-      offlineKey: `credit_${uid}_${Date.now()}`,
-    };
-
-    await addDoc(transactionsCollection, transactionRecord);
+      offlineKey,
+    });
     await setOfflineItem(`balance_${uid}`, newBalance!);
   } catch (error) {
     console.error('Error adding money:', error);
@@ -174,16 +183,19 @@ export const bulkAddMoneyToStudents = async (schoolId: string, amount: number, d
         lastUpdated: serverTimestamp(),
       });
 
-      // Record transaction
-      const transaction: Transaction = {
-        uid,
-        type: 'credit',
+      // Record credit transaction
+      await addDoc(paymentsCollection, {
+        studentId: uid,
+        schoolId,
+        paidTo: 'school',
         amount,
+        amountPaid: amount,
         description,
+        type: 'credit',
         timestamp: Date.now(),
-      };
-
-      await addDoc(transactionsCollection, transaction);
+        status: 'completed',
+        synced: true,
+      });
     }
   } catch (error) {
     console.error('Error bulk adding money:', error);
@@ -194,13 +206,23 @@ export const bulkAddMoneyToStudents = async (schoolId: string, amount: number, d
 // Get user transactions
 export const getUserTransactions = async (uid: string, limit: number = 50): Promise<Transaction[]> => {
   try {
-    const q = query(transactionsCollection, where('uid', '==', uid));
+    const q = query(paymentsCollection, where('studentId', '==', uid), orderBy('timestamp', 'desc'));
     const snapshot = await getDocs(q);
 
-    return snapshot.docs.map((doc) => ({
+    const onlineTransactions = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     } as Transaction));
+
+    const offlineTransactions = await getPendingItems('payments');
+    const pendingForUser = offlineTransactions
+      .filter((item) => item.studentId === uid)
+      .map((item) => ({
+        ...item,
+        synced: false,
+      } as Transaction));
+
+    return [...pendingForUser, ...onlineTransactions].slice(0, limit);
   } catch (error) {
     console.error('Error getting transactions:', error);
     return [];
@@ -235,43 +257,33 @@ export const getAllStudentBalances = async (schoolId: string): Promise<(UserBala
 // Get all payment transactions for admin view (who paid, how much, when)
 export const getAllPaymentHistory = async (schoolId: string, limit: number = 100): Promise<(Transaction & { name: string; email: string })[]> => {
   try {
-    // Get all students in the school
-    const usersRef = collection(db, 'users');
-    const studentsQuery = query(
-      usersRef,
-      where('schoolId', '==', schoolId),
-      where('role', '==', 'student')
-    );
+    const studentsQuery = query(usersCollection, where('schoolId', '==', schoolId), where('role', '==', 'student'));
     const studentsSnapshot = await getDocs(studentsQuery);
-    const studentUids = studentsSnapshot.docs.map(doc => doc.id);
-    const studentMap = new Map();
-    studentsSnapshot.docs.forEach(doc => {
-      studentMap.set(doc.id, { name: doc.data().name, email: doc.data().email });
+    const studentMap = new Map<string, { name: string; email: string }>();
+    studentsSnapshot.docs.forEach((docItem) => {
+      const data = docItem.data();
+      studentMap.set(docItem.id, { name: data.name, email: data.email });
     });
 
-    // Get all transactions for these students
-    const allTransactions: (Transaction & { name: string; email: string })[] = [];
-    for (const uid of studentUids) {
-      const q = query(transactionsCollection, where('uid', '==', uid));
-      const snapshot = await getDocs(q);
-      snapshot.docs.forEach(doc => {
-        const data = doc.data() as Transaction;
-        const student = studentMap.get(uid);
-        if (student) {
-          allTransactions.push({
-            ...data,
-            id: doc.id,
-            name: student.name,
-            email: student.email,
-          });
-        }
-      });
-    }
+    const paymentsQuery = query(paymentsCollection, where('schoolId', '==', schoolId), orderBy('timestamp', 'desc'));
+    const paymentsSnapshot = await getDocs(paymentsQuery);
 
-    // Sort by timestamp descending and limit
-    return allTransactions
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, limit);
+    const allTransactions = paymentsSnapshot.docs
+      .map((docItem) => {
+        const data = docItem.data() as Transaction & { studentId: string };
+        const student = studentMap.get(data.studentId);
+        return student
+          ? {
+              id: docItem.id,
+              ...data,
+              name: student.name,
+              email: student.email,
+            }
+          : null;
+      })
+      .filter(Boolean) as (Transaction & { name: string; email: string })[];
+
+    return allTransactions.slice(0, limit);
   } catch (error) {
     console.error('Error getting payment history:', error);
     return [];
@@ -279,7 +291,7 @@ export const getAllPaymentHistory = async (schoolId: string, limit: number = 100
 };
 
 // Record offline payment (for when user is offline)
-export const recordOfflinePayment = async (uid: string, amount: number, description: string): Promise<void> => {
+export const recordOfflinePayment = async (uid: string, schoolId: string, amount: number, description: string): Promise<void> => {
   const key = `payment_${uid}_${Date.now()}`;
   const transaction: Transaction = {
     uid,
@@ -291,7 +303,13 @@ export const recordOfflinePayment = async (uid: string, amount: number, descript
     offlineKey: key,
   };
 
-  await setOfflineItem(key, transaction, true);
+  await savePending('payments', {
+    ...transaction,
+    studentId: uid,
+    schoolId,
+    paidTo: 'school',
+    status: 'pending',
+  });
 
   const currentBalance = (await getOfflineItem(`balance_${uid}`)) ?? INITIAL_BALANCE;
   const newBalance = currentBalance - amount;

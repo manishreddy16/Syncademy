@@ -97,6 +97,7 @@ function App() {
       { label: 'Assignments', path: '/assignments' },
       { label: 'Resources', path: '/resources' },
       { label: 'Payments', path: '/payments' },
+      { label: 'Maps', path: '/maps' },
       { label: 'Analytics', path: '/admin/analytics' },
     ],
     []
@@ -108,6 +109,7 @@ function App() {
       { label: 'Assignments', path: '/assignments' },
       { label: 'Resources', path: '/resources' },
       { label: 'Payments', path: '/payments' },
+      { label: 'Maps', path: '/maps' },
       { label: 'My Grades', path: '/student/grades' },
     ],
     []

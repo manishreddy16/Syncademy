@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import { getUserBalance, getUserTransactions } from '../services/payment';
 import { getStudentSubmissions } from '../services/assignments';
 import { getOnlineStatus, subscribeToOnlineStatus } from '../utils/onlineStatus';
@@ -14,6 +15,8 @@ const StudentDashboardPage = ({ user }: StudentDashboardPageProps) => {
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [isOnline, setIsOnline] = useState(getOnlineStatus());
   const [loading, setLoading] = useState(true);
+  const [location, setLocation] = useState<[number, number]>([6.9271, 79.8612]);
+  const [locationStatus, setLocationStatus] = useState('Retrieving location...');
 
   useEffect(() => {
     const unsubscribe = subscribeToOnlineStatus(setIsOnline);
@@ -40,6 +43,24 @@ const StudentDashboardPage = ({ user }: StudentDashboardPageProps) => {
 
     loadData();
   }, [user.uid]);
+
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setLocationStatus('Geolocation not supported.');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocation([position.coords.latitude, position.coords.longitude]);
+        setLocationStatus('Location loaded successfully');
+      },
+      () => {
+        setLocationStatus('Unable to retrieve location. Showing default map.');
+      },
+      { timeout: 10000 }
+    );
+  }, []);
 
   return (
     <div className="space-y-8">
@@ -82,6 +103,27 @@ const StudentDashboardPage = ({ user }: StudentDashboardPageProps) => {
 
       {/* Pending Tasks */}
       <PendingTasksSection user={user} />
+
+      <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-xl font-semibold text-white">Current Location</h2>
+            <p className="text-sm text-slate-400">{locationStatus}</p>
+          </div>
+          <span className="text-sm text-slate-300">Live map preview</span>
+        </div>
+        <div className="h-72 w-full overflow-hidden rounded-3xl border border-slate-800">
+          <MapContainer center={location} zoom={12} className="h-full w-full">
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution="&copy; OpenStreetMap contributors"
+            />
+            <Marker position={location}>
+              <Popup>Your current location</Popup>
+            </Marker>
+          </MapContainer>
+        </div>
+      </div>
 
       {/* Recent Transactions */}
       <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-6 overflow-x-auto">

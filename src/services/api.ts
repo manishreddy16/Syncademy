@@ -13,9 +13,10 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { setAuth } from '../utils/auth';
 import { getOnlineStatus } from '../utils/onlineStatus';
-import { setOfflineItem } from '../utils/offlineStorage';
+import { savePending } from '../utils/offlineStorage';
 
 type Role = 'admin' | 'student';
 
@@ -31,6 +32,7 @@ type UserProfile = {
 
 const schoolsCollection = collection(db, 'schools');
 const usersCollection = collection(db, 'users');
+const registrationRequestsCollection = collection(db, 'registrationRequests');
 const assignmentsCollection = collection(db, 'assignments');
 const resourcesCollection = collection(db, 'resources');
 const paymentsCollection = collection(db, 'payments');
@@ -74,14 +76,23 @@ export const registerStudent = async (payload: { email: string; name: string; ro
     throw new Error('School ID not found. Please check your School ID and try again.');
   }
 
+  const offlineKey = `registration_${payload.email}_${Date.now()}`;
+  const requestPayload = {
+    email: payload.email,
+    name: payload.name,
+    rollNo: payload.rollNo,
+    schoolId: payload.schoolId,
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    offlineKey,
+    password: payload.password,
+  };
+
   if (!getOnlineStatus()) {
-    const offlineKey = `registration_${payload.email}_${Date.now()}`;
-    await setOfflineItem(offlineKey, {
-      ...payload,
-      approved: false,
-      offlineKey,
-      requestedAt: Date.now(),
-    }, true);
+    await savePending('registrations', {
+      ...requestPayload,
+      key: offlineKey,
+    });
 
     return {
       email: payload.email,
@@ -91,16 +102,7 @@ export const registerStudent = async (payload: { email: string; name: string; ro
     };
   }
 
-  const userCredential = await createUserWithEmailAndPassword(auth, payload.email, payload.password);
-  await setDoc(doc(db, 'users', userCredential.user.uid), {
-    email: payload.email,
-    role: 'student',
-    schoolId: payload.schoolId,
-    name: payload.name,
-    rollNo: payload.rollNo,
-    approved: false,
-    createdAt: serverTimestamp(),
-  });
+  await addDoc(registrationRequestsCollection, requestPayload);
   return { email: payload.email, schoolId: payload.schoolId, name: payload.name };
 };
 
@@ -124,18 +126,24 @@ export const fetchDashboard = async (user: UserProfile) => {
   const studentsQuery = query(usersCollection, where('schoolId', '==', schoolId), where('role', '==', 'student'));
   const studentDocs = await getDocs(studentsQuery);
   const approvedStudents = studentDocs.docs.filter((docItem) => docItem.data().approved !== false).length;
-  const pendingStudents = studentDocs.docs.filter((docItem) => docItem.data().approved === false).length;
 
-  const assignmentsQuery = query(assignmentsCollection, where('schoolId', '==', schoolId), orderBy('createdAt', 'desc'));
+  const registrationQuery = query(
+    registrationRequestsCollection,
+    where('schoolId', '==', schoolId),
+    where('status', '==', 'pending')
+  );
+  const registrationDocs = await getDocs(registrationQuery);
+
+  const assignmentsQuery = query(assignmentsCollection, where('schoolId', '==', schoolId));
   const assignmentDocs = await getDocs(assignmentsQuery);
 
-  const paymentsQuery = query(paymentsCollection, where('schoolId', '==', schoolId), orderBy('createdAt', 'desc'));
+  const paymentsQuery = query(paymentsCollection, where('schoolId', '==', schoolId));
   const paymentDocs = await getDocs(paymentsQuery);
   const pendingPayments = paymentDocs.docs.filter((docItem) => docItem.data().status === 'pending').length;
 
   return {
     approvedStudents,
-    pendingStudents,
+    pendingStudents: registrationDocs.docs.length,
     dueAssignments: assignmentDocs.docs.length,
     pendingPayments,
   };
@@ -143,17 +151,40 @@ export const fetchDashboard = async (user: UserProfile) => {
 
 export const fetchPendingStudents = async (user: UserProfile) => {
   const pendingQuery = query(
-    usersCollection,
+    registrationRequestsCollection,
     where('schoolId', '==', user.schoolId),
-    where('role', '==', 'student'),
-    where('approved', '==', false)
+    where('status', '==', 'pending')
   );
   const snapshot = await getDocs(pendingQuery);
   return snapshot.docs.map((docItem) => ({ id: docItem.id, ...docItem.data() }));
 };
 
-export const approveStudent = async (studentId: string, approved: boolean) => {
-  await updateDoc(doc(db, 'users', studentId), { approved });
+export const approveStudent = async (requestId: string, approved: boolean) => {
+  const requestRef = doc(db, 'registrationRequests', requestId);
+  const requestDoc = await getDoc(requestRef);
+
+  if (!requestDoc.exists()) {
+    throw new Error('Registration request not found.');
+  }
+
+  const requestData = requestDoc.data() as any;
+
+  if (approved) {
+    const userCredential = await createUserWithEmailAndPassword(auth, requestData.email, requestData.password);
+    await setDoc(doc(db, 'users', userCredential.user.uid), {
+      email: requestData.email,
+      role: 'student',
+      schoolId: requestData.schoolId,
+      name: requestData.name,
+      rollNo: requestData.rollNo,
+      approved: true,
+      createdAt: serverTimestamp(),
+      balance: 0,
+    });
+    await updateDoc(requestRef, { status: 'approved', processedAt: serverTimestamp() });
+  } else {
+    await updateDoc(requestRef, { status: 'rejected', processedAt: serverTimestamp() });
+  }
 };
 
 export const fetchAssignments = async (user: UserProfile) => {

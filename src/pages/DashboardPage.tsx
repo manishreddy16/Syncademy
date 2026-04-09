@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 import { fetchDashboard, fetchPendingStudents, approveStudent } from '../services/api';
 
 interface DashboardPageProps {
@@ -9,6 +11,8 @@ const DashboardPage = ({ user }: DashboardPageProps) => {
   const [stats, setStats] = useState<{ approvedStudents: number; pendingStudents: number; dueAssignments: number; pendingPayments: number } | null>(null);
   const [pendingStudents, setPendingStudents] = useState<any[]>([]);
   const [error, setError] = useState('');
+  const [location, setLocation] = useState<[number, number]>([6.9271, 79.8612]);
+  const [locationStatus, setLocationStatus] = useState('Retrieving location...');
 
   useEffect(() => {
     const load = async () => {
@@ -25,6 +29,24 @@ const DashboardPage = ({ user }: DashboardPageProps) => {
     };
     load();
   }, [user]);
+
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setLocationStatus('Geolocation not supported.');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocation([position.coords.latitude, position.coords.longitude]);
+        setLocationStatus('Current location detected');
+      },
+      () => {
+        setLocationStatus('Unable to retrieve location, showing default map');
+      },
+      { timeout: 10000 }
+    );
+  }, []);
 
   return (
     <section className="space-y-6">
@@ -123,6 +145,27 @@ const DashboardPage = ({ user }: DashboardPageProps) => {
           </div>
         </div>
       )}
+
+      <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-6 shadow-soft">
+        <div className="flex items-center justify-between gap-4 mb-4">
+          <div>
+            <h3 className="text-xl font-semibold text-white">Live Location</h3>
+            <p className="text-sm text-slate-400">{locationStatus}</p>
+          </div>
+          <span className="text-sm text-slate-300">Current location shown on map</span>
+        </div>
+        <div className="h-72 w-full overflow-hidden rounded-3xl border border-slate-800">
+          <MapContainer center={location} zoom={13} className="h-full w-full">
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution="&copy; OpenStreetMap contributors"
+            />
+            <Marker position={location}>
+              <Popup>Your current location</Popup>
+            </Marker>
+          </MapContainer>
+        </div>
+      </div>
     </section>
   );
 };

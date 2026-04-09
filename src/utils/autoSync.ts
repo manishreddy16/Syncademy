@@ -1,7 +1,7 @@
 // Auto-sync service
 // Syncs pending offline data to Firebase when online
 
-import { getPendingSyncs, markAsSynced } from './offlineStorage';
+import { syncPending, getPendingSyncs, markAsSynced } from './offlineStorage';
 import { subscribeToOnlineStatus } from './onlineStatus';
 import { auth, db } from '../firebase';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
@@ -13,11 +13,13 @@ import {
   addDoc,
   setDoc,
   doc,
+  getDoc,
   serverTimestamp,
   runTransaction,
 } from 'firebase/firestore';
 import { syncOfflineResource } from '../services/resources';
 
+const registrationRequestsCollection = collection(db, 'registrationRequests');
 let isSyncing = false;
 
 export const initAutoSync = (): void => {
@@ -45,6 +47,11 @@ export const syncPendingData = async (): Promise<void> => {
         console.warn(`Failed to sync ${item.key}:`, error);
       }
     }
+
+    await syncPending('payments', syncPayment);
+    await syncPending('assignments', syncAssignment);
+    await syncPending('resources', syncOfflineResource);
+    await syncPending('registrations', syncRegistrationRequest);
   } finally {
     isSyncing = false;
   }
@@ -73,9 +80,12 @@ const syncPayment = async (paymentData: any): Promise<void> => {
 
     if (snapshot.empty) {
       const userRef = doc(db, 'users', paymentData.uid);
+      const userDoc = await getDoc(userRef);
+      const schoolId = userDoc.exists() ? userDoc.data()?.schoolId || '' : '';
+
       await runTransaction(db, async (transaction) => {
-        const userDoc = await transaction.get(userRef);
-        const currentBalance = userDoc.exists() ? userDoc.data()?.balance || 0 : 0;
+        const currentDoc = await transaction.get(userRef);
+        const currentBalance = currentDoc.exists() ? currentDoc.data()?.balance || 0 : 0;
         transaction.update(userRef, {
           balance: currentBalance - paymentData.amount,
           lastUpdated: serverTimestamp(),
@@ -83,9 +93,17 @@ const syncPayment = async (paymentData: any): Promise<void> => {
       });
 
       await addDoc(paymentsRef, {
-        ...paymentData,
+        studentId: paymentData.uid,
+        schoolId,
+        paidTo: paymentData.paidTo || 'school',
+        amount: paymentData.amount,
+        amountPaid: paymentData.amount,
+        description: paymentData.description,
+        type: 'debit',
+        timestamp: paymentData.timestamp || Date.now(),
+        status: 'completed',
         synced: true,
-        syncedAt: serverTimestamp(),
+        offlineKey: paymentData.offlineKey,
       });
     }
   } catch (error) {
@@ -115,35 +133,28 @@ const syncAssignment = async (assignmentData: any): Promise<void> => {
 
 const syncRegistrationRequest = async (registrationData: any): Promise<void> => {
   try {
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('email', '==', registrationData.email));
-    const snapshot = await getDocs(q);
+    const requestQuery = query(
+      registrationRequestsCollection,
+      where('email', '==', registrationData.email),
+      where('schoolId', '==', registrationData.schoolId)
+    );
+    const requestSnapshot = await getDocs(requestQuery);
 
-    if (!snapshot.empty) {
+    if (!requestSnapshot.empty) {
       return;
     }
 
-    const userCredential = await createUserWithEmailAndPassword(
-      auth,
-      registrationData.email,
-      registrationData.password
-    );
-
-    await setDoc(doc(db, 'users', userCredential.user.uid), {
+    await addDoc(registrationRequestsCollection, {
       email: registrationData.email,
-      role: 'student',
-      schoolId: registrationData.schoolId,
       name: registrationData.name,
       rollNo: registrationData.rollNo,
-      approved: false,
+      schoolId: registrationData.schoolId,
+      password: registrationData.password,
+      status: 'pending',
       createdAt: serverTimestamp(),
-      synced: true,
       offlineKey: registrationData.offlineKey,
     });
-  } catch (error: any) {
-    if (error.code === 'auth/email-already-in-use') {
-      return;
-    }
+  } catch (error) {
     console.error('Registration sync failed:', error);
     throw error;
   }

@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '0.0.0.0',
       port: 5173,
+      historyApiFallback: true,
     },
     resolve: {
       alias: {

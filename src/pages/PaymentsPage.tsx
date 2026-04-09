@@ -62,7 +62,7 @@ const PaymentsPage = ({ user }: PaymentsPageProps) => {
         await deductMoney(user.uid, paymentAmount, description || 'Payment');
         setFeedback({ type: 'success', message: 'Payment successful!' });
       } else {
-        await recordOfflinePayment(user.uid, paymentAmount, description || 'Payment (Offline)');
+        await recordOfflinePayment(user.uid, user.schoolId, paymentAmount, description || 'Payment (Offline)');
         setFeedback({ type: 'success', message: 'Payment recorded offline. Will sync when online.' });
       }
 
