@@ -21,27 +21,37 @@ const PaymentsPage = ({ user }: PaymentsPageProps) => {
     return unsubscribe;
   }, []);
 
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        if (!isAdminUser()) {
-          const userBalance = await getUserBalance(user.uid);
-          setBalance(userBalance);
-          const userTransactions = await getUserTransactions(user.uid);
-          setTransactions(userTransactions);
-        } else {
-          const history = await getAllPaymentHistory(user.schoolId);
-          setTransactions(history);
-        }
-      } catch (error) {
-        console.error('Error loading payment data:', error);
-        setFeedback({ type: 'error', message: 'Unable to load payment data' });
+  const loadData = async () => {
+    try {
+      if (!isAdminUser()) {
+        const userBalance = await getUserBalance(user.uid);
+        setBalance(userBalance);
+        const userTransactions = await getUserTransactions(user.uid);
+        setTransactions(userTransactions);
+      } else {
+        const history = await getAllPaymentHistory(user.schoolId);
+        setTransactions(history);
       }
-    };
+    } catch (error) {
+      console.error('Error loading payment data:', error);
+      setFeedback({ type: 'error', message: 'Unable to load payment data' });
+    }
+  };
 
+  useEffect(() => {
     loadData();
     const interval = setInterval(loadData, 30000); // Refresh every 30 seconds
-    return () => clearInterval(interval);
+
+    const handleSyncComplete = () => {
+      loadData();
+    };
+
+    window.addEventListener('syncademy:sync-complete', handleSyncComplete);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('syncademy:sync-complete', handleSyncComplete);
+    };
   }, [user.uid, user.schoolId]);
 
   const handlePayment = async (e: React.FormEvent) => {
@@ -97,7 +107,7 @@ const PaymentsPage = ({ user }: PaymentsPageProps) => {
           <div className="rounded-3xl bg-slate-950/80 px-6 py-4 text-slate-200 shadow-soft">
             <p className="text-sm text-slate-400">{isAdminUser() ? 'Payment history' : 'Available Balance'}</p>
             {!isAdminUser() ? (
-              <p className="mt-2 text-2xl font-semibold text-indigo-400">{balance.toLocaleString()} units</p>
+              <p className="mt-2 text-2xl font-semibold text-indigo-400">₹{balance.toLocaleString()}</p>
             ) : (
               <p className="mt-2 text-2xl font-semibold text-white">School payment ledger</p>
             )}
@@ -202,10 +212,10 @@ const PaymentsPage = ({ user }: PaymentsPageProps) => {
                       {tx.type === 'credit' ? '+ Credit' : '- Debit'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 font-semibold text-white">{tx.amount.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-semibold text-white">₹{tx.amount.toLocaleString()}</td>
                   <td className="px-4 py-3 text-slate-300">{tx.description}</td>
                   <td className="px-4 py-3 text-slate-400">
-                    {new Date(tx.timestamp).toLocaleDateString()}
+                    {new Date(tx.timestamp).toLocaleString()}
                   </td>
                   <td className="px-4 py-3">
                     <span className={`text-xs font-medium ${tx.synced ? 'text-green-400' : 'text-amber-400'}`}>

@@ -19,6 +19,7 @@ import PaymentsPage from './pages/PaymentsPage';
 import MapsPage from './pages/MapsPage';
 import DebugPage from './pages/DebugPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
+import GradesPage from './pages/GradesPage';
 import StudentDashboardPage from './pages/StudentDashboardPage';
 import LandingPage from './pages/LandingPage';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -112,7 +113,6 @@ function App() {
       { label: 'Resources', path: '/resources' },
       { label: 'Payments', path: '/payments' },
       { label: 'Maps', path: '/maps' },
-      { label: 'Analytics', path: '/admin/analytics' },
     ],
     []
   );
@@ -164,7 +164,7 @@ function App() {
               {isStudent && (
                 <>
                   <Route path="/student/dashboard" element={<StudentDashboardPage user={user} />} />
-                  <Route path="/student/grades" element={<StudentDashboardPage user={user} />} />
+                  <Route path="/student/grades" element={<GradesPage user={user} />} />
                 </>
               )}
 

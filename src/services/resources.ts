@@ -14,12 +14,12 @@ import {
   setDoc,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getBytes, deleteObject, getStorage } from 'firebase/storage';
-import { setOfflineItem, removeOfflineItem, savePending } from '../utils/offlineStorage';
+import { getOfflineItemsByPrefix, setOfflineItem, removeOfflineItem, savePending } from '../utils/offlineStorage';
 
 const resourcesCollection = collection(db, 'resources');
 const storage = getStorage();
 
-const blobToBase64 = (blob: Blob): Promise<string> => {
+export const blobToBase64 = (blob: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
@@ -28,7 +28,7 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
   });
 };
 
-const base64ToBlob = (dataURI: string): Blob => {
+export const base64ToBlob = (dataURI: string): Blob => {
   const [prefix, base64] = dataURI.split(',');
   const byteString = atob(base64);
   const mimeString = prefix.split(':')[1].split(';')[0];
@@ -150,12 +150,25 @@ export const getSchoolResources = async (schoolId: string): Promise<Resource[]> 
     const q = query(resourcesCollection, where('schoolId', '==', schoolId));
     const snapshot = await getDocs(q);
 
-    return snapshot.docs
+    const onlineResources = snapshot.docs
       .map((docItem) => ({ id: docItem.id, ...docItem.data() } as Resource))
       .sort((a, b) => (b.uploadedAt || 0) - (a.uploadedAt || 0));
+
+    const offlineResources = (await getOfflineItemsByPrefix('resource_'))
+      .map((item) => item.value as Resource)
+      .filter((resource) => resource.schoolId === schoolId)
+      .sort((a, b) => (b.uploadedAt || 0) - (a.uploadedAt || 0));
+
+    return [...offlineResources, ...onlineResources];
   } catch (error) {
     console.error('Error getting resources:', error);
-    return [];
+
+    const offlineResources = (await getOfflineItemsByPrefix('resource_'))
+      .map((item) => item.value as Resource)
+      .filter((resource) => resource.schoolId === schoolId)
+      .sort((a, b) => (b.uploadedAt || 0) - (a.uploadedAt || 0));
+
+    return offlineResources;
   }
 };
 

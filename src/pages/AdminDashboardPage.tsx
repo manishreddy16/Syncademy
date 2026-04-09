@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
-import { getAllPaymentHistory, bulkAddMoneyToStudents, getAllStudentBalances } from '../services/payment';
+import {
+  getAllPaymentHistory,
+  bulkAddMoneyToStudents,
+  getAllStudentBalances,
+  addMoneyToStudent,
+  recordOfflineCredit,
+  recordOfflineBulkCredit,
+} from '../services/payment';
 import { getSchoolResources } from '../services/resources';
-import { getSchoolAssignments } from '../services/assignments';
+import { getSchoolAssignments, getSchoolSubmissions } from '../services/assignments';
 import { getOnlineStatus, subscribeToOnlineStatus } from '../utils/onlineStatus';
 import { fetchPendingStudents, approveStudent } from '../services/api';
 import PendingTasksSection from '../components/PendingTasksSection';
@@ -15,7 +22,12 @@ const AdminDashboardPage = ({ user }: AdminDashboardPageProps) => {
   const [pendingStudents, setPendingStudents] = useState<any[]>([]);
   const [resources, setResources] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
+  const [recentSubmissions, setRecentSubmissions] = useState<any[]>([]);
   const [studentCount, setStudentCount] = useState(0);
+  const [studentBalances, setStudentBalances] = useState<any[]>([]);
+  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [individualAmount, setIndividualAmount] = useState(0);
+  const [individualDescription, setIndividualDescription] = useState('Add money');
   const [isOnline, setIsOnline] = useState(getOnlineStatus());
   const [loading, setLoading] = useState(true);
   const [bulkAddAmount, setBulkAddAmount] = useState(1000);
@@ -26,38 +38,53 @@ const AdminDashboardPage = ({ user }: AdminDashboardPageProps) => {
     return unsubscribe;
   }, []);
 
+  const loadData = async () => {
+    try {
+      const history = await getAllPaymentHistory(user.schoolId);
+      setPaymentHistory(history);
+
+      const pending = await fetchPendingStudents(user);
+      setPendingStudents(pending);
+
+      const schoolResources = await getSchoolResources(user.schoolId);
+      setResources(schoolResources);
+
+      const schoolAssignments = await getSchoolAssignments(user.schoolId);
+      setAssignments(schoolAssignments);
+
+      const studentList = await getAllStudentBalances(user.schoolId);
+      setStudentBalances(studentList);
+      setStudentCount(studentList.length);
+
+      const schoolSubmissions = await getSchoolSubmissions(user.schoolId);
+      setRecentSubmissions(schoolSubmissions.slice(0, 5));
+    } catch (error) {
+      console.error('Error loading admin dashboard:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const history = await getAllPaymentHistory(user.schoolId);
-        setPaymentHistory(history);
+    loadData();
 
-        const pending = await fetchPendingStudents(user);
-        setPendingStudents(pending);
-
-        const schoolResources = await getSchoolResources(user.schoolId);
-        setResources(schoolResources);
-
-        const schoolAssignments = await getSchoolAssignments(user.schoolId);
-        setAssignments(schoolAssignments);
-
-        const studentBalances = await getAllStudentBalances(user.schoolId);
-        setStudentCount(studentBalances.length);
-      } catch (error) {
-        console.error('Error loading admin dashboard:', error);
-      } finally {
-        setLoading(false);
-      }
+    const handleSyncComplete = () => {
+      loadData();
     };
 
-    loadData();
+    window.addEventListener('syncademy:sync-complete', handleSyncComplete);
+    return () => window.removeEventListener('syncademy:sync-complete', handleSyncComplete);
   }, [user.schoolId]);
 
   const handleBulkAddMoney = async () => {
     try {
       setLoading(true);
-      await bulkAddMoneyToStudents(user.schoolId, bulkAddAmount, `Bulk add: ${bulkAddAmount} units`);
-      
+      if (isOnline) {
+        await bulkAddMoneyToStudents(user.schoolId, bulkAddAmount, `Bulk add: ${bulkAddAmount} units`);
+      } else {
+        await recordOfflineBulkCredit(user.schoolId, bulkAddAmount, `Bulk add: ${bulkAddAmount} units`);
+      }
+
       // Reload payment history
       const history = await getAllPaymentHistory(user.schoolId);
       setPaymentHistory(history);
@@ -66,6 +93,36 @@ const AdminDashboardPage = ({ user }: AdminDashboardPageProps) => {
       setBulkAddAmount(1000);
     } catch (error) {
       console.error('Error adding money:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddMoneyToStudent = async () => {
+    if (!selectedStudentId || individualAmount <= 0) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      if (isOnline) {
+        await addMoneyToStudent(selectedStudentId, individualAmount, individualDescription);
+      } else {
+        await recordOfflineCredit(selectedStudentId, user.schoolId, individualAmount, individualDescription);
+      }
+
+      const history = await getAllPaymentHistory(user.schoolId);
+      setPaymentHistory(history);
+
+      const studentList = await getAllStudentBalances(user.schoolId);
+      setStudentBalances(studentList);
+      setStudentCount(studentList.length);
+
+      setSelectedStudentId('');
+      setIndividualAmount(0);
+      setIndividualDescription('Add money');
+    } catch (error) {
+      console.error('Error adding money to student:', error);
     } finally {
       setLoading(false);
     }
@@ -126,6 +183,55 @@ const AdminDashboardPage = ({ user }: AdminDashboardPageProps) => {
         </div>
       </div>
 
+      <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-6">
+        <h2 className="text-xl font-semibold text-white mb-4">Student Balance Overview</h2>
+        {studentBalances.length === 0 ? (
+          <p className="text-slate-400">No student data available yet.</p>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            {studentBalances.slice(0, 8).map((student) => (
+              <div key={student.uid} className="rounded-3xl bg-slate-950/80 p-4 border border-slate-700">
+                <p className="text-white font-semibold">{student.name}</p>
+                <p className="text-slate-400 text-sm">{student.email}</p>
+                <p className="mt-3 text-white font-semibold">₹{student.balance.toLocaleString()}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-6">
+        <h2 className="text-xl font-semibold text-white mb-4">Recent Assignment Submissions</h2>
+        {recentSubmissions.length === 0 ? (
+          <p className="text-slate-400">No recent submissions yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {recentSubmissions.map((submission) => (
+              <div key={submission.id || submission.offlineKey} className="rounded-3xl bg-slate-950/80 p-4 border border-slate-700">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div>
+                    <p className="text-white font-semibold">Assignment {submission.assignmentId}</p>
+                    <p className="text-slate-400 text-sm mt-1">Student: {submission.studentName || submission.uid}</p>
+                    <p className="text-slate-400 text-sm mt-1">
+                      Submitted {new Date(submission.submittedAt || Date.now()).toLocaleString()}
+                    </p>
+                  </div>
+                  <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                    submission.status === 'graded'
+                      ? 'bg-emerald-900 text-emerald-200'
+                      : submission.status === 'submitted'
+                      ? 'bg-blue-900 text-blue-200'
+                      : 'bg-amber-900 text-amber-200'
+                  }`}>
+                    {submission.status === 'graded' ? `Graded${submission.grade ? `: ${submission.grade}` : ''}` : submission.status === 'submitted' ? 'Submitted' : 'Pending'}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Pending Student Approvals */}
       {pendingStudents.length > 0 && (
         <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-6">
@@ -167,7 +273,7 @@ const AdminDashboardPage = ({ user }: AdminDashboardPageProps) => {
             <button
               onClick={() => setShowBulkAddForm(true)}
               className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed"
-              disabled={!isOnline || loading}
+              disabled={loading}
             >
               Add Money to All
             </button>
@@ -190,7 +296,7 @@ const AdminDashboardPage = ({ user }: AdminDashboardPageProps) => {
             <div className="flex gap-4">
               <button
                 onClick={handleBulkAddMoney}
-                disabled={loading || !isOnline}
+                disabled={loading}
                 className="px-4 py-2 rounded-lg bg-green-600 text-white font-medium hover:bg-green-500 disabled:opacity-60"
               >
                 {loading ? 'Adding...' : 'Confirm'}
@@ -204,6 +310,69 @@ const AdminDashboardPage = ({ user }: AdminDashboardPageProps) => {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-xl font-semibold text-white">Add Money to Individual Student</h2>
+            <p className="text-slate-400 text-sm">Choose a student and top up their balance.</p>
+          </div>
+          <span className="text-sm text-slate-500">{isOnline ? 'Online' : 'Offline queued'}</span>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">Select student</label>
+            <select
+              value={selectedStudentId}
+              onChange={(e) => setSelectedStudentId(e.target.value)}
+              className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white focus:border-indigo-500"
+            >
+              <option value="">Choose a student</option>
+              {studentBalances.map((student) => (
+                <option key={student.uid} value={student.uid}>
+                  {student.name} ({student.email})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">Amount</label>
+            <input
+              type="number"
+              value={individualAmount}
+              onChange={(e) => setIndividualAmount(parseInt(e.target.value))}
+              placeholder="Amount"
+              className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white focus:border-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">Description</label>
+            <input
+              type="text"
+              value={individualDescription}
+              onChange={(e) => setIndividualDescription(e.target.value)}
+              placeholder="e.g. Bonus credit"
+              className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white focus:border-indigo-500"
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-col sm:flex-row gap-3">
+          <button
+            onClick={handleAddMoneyToStudent}
+            disabled={loading || !selectedStudentId || individualAmount <= 0}
+            className="rounded-2xl bg-green-600 px-5 py-3 text-white font-semibold hover:bg-green-500 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {loading ? 'Saving...' : 'Add Money'}
+          </button>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            Admin actions are queued locally while offline and will sync once connectivity returns.
+          </p>
+        </div>
       </div>
 
       {/* Payment History Table */}

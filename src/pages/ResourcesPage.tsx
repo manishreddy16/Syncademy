@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { getSchoolResources, uploadResource, downloadResourceForOffline, deleteResource, uploadResourceOffline } from '../services/resources';
+import { getOfflineItemsByPrefix } from '../utils/offlineStorage';
 import { getOnlineStatus, subscribeToOnlineStatus } from '../utils/onlineStatus';
-import { getCurrentUser, isAdminUser } from '../utils/auth';
+import { isAdminUser } from '../utils/auth';
 import FileSharingComponent from '../components/FileSharingComponent';
 
 interface ResourcesPageProps {
@@ -23,27 +24,34 @@ const ResourcesPage = ({ user }: ResourcesPageProps) => {
     return unsubscribe;
   }, []);
 
-  useEffect(() => {
-    const loadResources = async () => {
-      setLoading(true);
-      try {
-        const schoolResources = await getSchoolResources(user.schoolId);
-        setResources(schoolResources);
+  const loadResources = async () => {
+    setLoading(true);
+    try {
+      const schoolResources = await getSchoolResources(user.schoolId);
+      setResources(schoolResources);
 
-        // Load offline resources from localStorage
-        const stored = localStorage.getItem(`offline_resources_${user.schoolId}`);
-        if (stored) {
-          setOfflineResources(JSON.parse(stored));
-        }
-      } catch (error) {
-        console.error('Error loading resources:', error);
-        setFeedback({ type: 'error', message: 'Unable to load resources' });
-      } finally {
-        setLoading(false);
-      }
+      const offlineItems = await getOfflineItemsByPrefix('resource_');
+      setOfflineResources(offlineItems
+        .map((item) => item.value)
+        .filter((resource: any) => resource.schoolId === user.schoolId)
+      );
+    } catch (error) {
+      console.error('Error loading resources:', error);
+      setFeedback({ type: 'error', message: 'Unable to load resources' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadResources();
+
+    const handleSyncComplete = () => {
+      loadResources();
     };
 
-    loadResources();
+    window.addEventListener('syncademy:sync-complete', handleSyncComplete);
+    return () => window.removeEventListener('syncademy:sync-complete', handleSyncComplete);
   }, [user.schoolId]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -105,10 +113,11 @@ const ResourcesPage = ({ user }: ResourcesPageProps) => {
       setLoading(true);
       await downloadResourceForOffline(resource.id, resource);
 
-      // Save to offline resources list
-      const updated = [...offlineResources, { ...resource, offline: true }];
+      const offlineItems = await getOfflineItemsByPrefix('resource_');
+      const updated = offlineItems
+        .map((item) => item.value)
+        .filter((res: any) => res.schoolId === user.schoolId);
       setOfflineResources(updated);
-      localStorage.setItem(`offline_resources_${user.schoolId}`, JSON.stringify(updated));
 
       setFeedback({ type: 'success', message: `${resource.name} saved for offline access` });
     } catch (error) {

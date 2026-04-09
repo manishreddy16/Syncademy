@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import { getUserBalance, getUserTransactions } from '../services/payment';
 import { getStudentSubmissions } from '../services/assignments';
@@ -78,13 +79,21 @@ const StudentDashboardPage = ({ user }: StudentDashboardPageProps) => {
             {isOnline ? '🟢 Online' : '🔴 Offline'}
           </div>
         </div>
+        <div className="mb-6">
+          <Link
+            to="/student/grades"
+            className="inline-flex items-center rounded-full bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500"
+          >
+            View My Grades
+          </Link>
+        </div>
       </div>
 
       {/* Main Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded-lg border border-indigo-700 bg-indigo-950/40 p-6">
           <p className="text-indigo-400 text-sm font-medium">💰 Balance</p>
-          <p className="text-3xl font-bold text-white mt-3">{balance.toLocaleString()} units</p>
+          <p className="text-3xl font-bold text-white mt-3">₹{balance.toLocaleString()}</p>
           <p className="text-indigo-300 text-xs mt-2">Available for payments</p>
         </div>
 
@@ -155,7 +164,7 @@ const StudentDashboardPage = ({ user }: StudentDashboardPageProps) => {
                   <td className="px-4 py-3 font-semibold text-white">{tx.amount.toLocaleString()}</td>
                   <td className="px-4 py-3 text-slate-300">{tx.description}</td>
                   <td className="px-4 py-3 text-slate-400">
-                    {new Date(tx.timestamp).toLocaleDateString()}
+                    {new Date(tx.timestamp).toLocaleString()}
                   </td>
                 </tr>
               ))}

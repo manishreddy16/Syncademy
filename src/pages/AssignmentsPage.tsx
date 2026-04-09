@@ -32,6 +32,7 @@ const AssignmentsPage = ({ user }: AssignmentsPageProps) => {
   // Student submission states
   const [selectedAssignment, setSelectedAssignment] = useState<string>('');
   const [submissionContent, setSubmissionContent] = useState('');
+  const [file, setFile] = useState<File | null>(null);
   const [feedback, setFeedback] = useState({ type: '', message: '' });
 
   useEffect(() => {
@@ -39,26 +40,33 @@ const AssignmentsPage = ({ user }: AssignmentsPageProps) => {
     return unsubscribe;
   }, []);
 
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      try {
-        const schoolAssignments = await getSchoolAssignments(user.schoolId);
-        setAssignments(schoolAssignments);
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const schoolAssignments = await getSchoolAssignments(user.schoolId);
+      setAssignments(schoolAssignments);
 
-        if (!isAdminUser()) {
-          const studentSubmissions = await getStudentSubmissions(user.uid);
-          setSubmissions(studentSubmissions);
-        }
-      } catch (error) {
-        console.error('Error loading assignments:', error);
-        setFeedback({ type: 'error', message: 'Failed to load assignments' });
-      } finally {
-        setLoading(false);
+      if (!isAdminUser()) {
+        const studentSubmissions = await getStudentSubmissions(user.uid);
+        setSubmissions(studentSubmissions);
       }
+    } catch (error) {
+      console.error('Error loading assignments:', error);
+      setFeedback({ type: 'error', message: 'Failed to load assignments' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+
+    const handleSyncComplete = () => {
+      loadData();
     };
 
-    loadData();
+    window.addEventListener('syncademy:sync-complete', handleSyncComplete);
+    return () => window.removeEventListener('syncademy:sync-complete', handleSyncComplete);
   }, [user.schoolId, user.uid]);
 
   const handleCreateAssignment = async (e: React.FormEvent) => {
@@ -113,8 +121,8 @@ const AssignmentsPage = ({ user }: AssignmentsPageProps) => {
     e.preventDefault();
     setFeedback({ type: '', message: '' });
 
-    if (!selectedAssignment || !submissionContent.trim()) {
-      setFeedback({ type: 'error', message: 'Please select an assignment and provide content' });
+    if (!selectedAssignment || (!submissionContent.trim() && !file)) {
+      setFeedback({ type: 'error', message: 'Please select an assignment and provide text or a file' });
       return;
     }
 
@@ -122,15 +130,16 @@ const AssignmentsPage = ({ user }: AssignmentsPageProps) => {
 
     try {
       if (isOnline) {
-        await submitAssignment(selectedAssignment, user.uid, submissionContent);
+        await submitAssignment(selectedAssignment, user.uid, submissionContent || null, file, user.schoolId);
         setFeedback({ type: 'success', message: 'Assignment submitted successfully!' });
       } else {
-        await submitAssignmentOffline(selectedAssignment, user.uid, submissionContent);
+        await submitAssignmentOffline(selectedAssignment, user.uid, submissionContent || null, file, user.schoolId);
         setFeedback({ type: 'success', message: 'Assignment saved offline. Will submit when online.' });
       }
 
       setSubmissionContent('');
       setSelectedAssignment('');
+      setFile(null);
 
       // Reload submissions
       const studentSubmissions = await getStudentSubmissions(user.uid);
@@ -302,11 +311,20 @@ const AssignmentsPage = ({ user }: AssignmentsPageProps) => {
                 <textarea
                   value={submissionContent}
                   onChange={(e) => setSubmissionContent(e.target.value)}
-                  required
                   rows={6}
                   placeholder="Write or paste your answer here..."
                   className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white focus:border-indigo-500"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Upload PDF (optional)</label>
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={(e) => setFile(e.target.files ? e.target.files[0] : null)}
+                  className="w-full text-white"
+                />
+                {file && <p className="mt-2 text-sm text-slate-400">Selected file: {file.name}</p>}
               </div>
               <button
                 type="submit"
@@ -346,7 +364,7 @@ const AssignmentsPage = ({ user }: AssignmentsPageProps) => {
                   <div className="flex-1">
                     <p className="font-semibold text-white">Assignment {submission.assignmentId}</p>
                     <p className="text-slate-400 text-sm mt-1">
-                      Submitted: {new Date(submission.submittedAt).toLocaleDateString()}
+                      Submitted: {new Date(submission.submittedAt).toLocaleString()}
                     </p>
                   </div>
                   <span

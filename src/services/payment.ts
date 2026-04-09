@@ -31,6 +31,7 @@ export interface UserBalance {
 export interface Transaction {
   id?: string;
   uid: string;
+  studentId?: string;
   type: 'debit' | 'credit'; // debit = payment/spending, credit = money added
   amount: number;
   description: string;
@@ -159,6 +160,81 @@ export const addMoney = async (uid: string, amount: number, description: string)
   }
 };
 
+export const recordOfflineCredit = async (uid: string, schoolId: string, amount: number, description: string): Promise<void> => {
+  const key = `payment_credit_${uid}_${Date.now()}`;
+  const transaction: Transaction = {
+    uid,
+    studentId: uid,
+    schoolId,
+    type: 'credit',
+    amount,
+    description,
+    timestamp: Date.now(),
+    synced: false,
+    offlineKey: key,
+  } as any;
+
+  await savePending('payments', {
+    ...transaction,
+    paidTo: 'school',
+    status: 'pending',
+    action: 'credit',
+  });
+
+  const currentBalance = (await getOfflineItem(`balance_${uid}`)) ?? INITIAL_BALANCE;
+  const newBalance = currentBalance + amount;
+  await setOfflineItem(`balance_${uid}`, newBalance);
+};
+
+export const addMoneyToStudent = async (uid: string, amount: number, description: string): Promise<void> => {
+  try {
+    const userRef = doc(usersCollection, uid);
+    let newBalance: number;
+
+    await runTransaction(db, async (transaction) => {
+      const userDoc = await transaction.get(userRef);
+      const currentBalance = userDoc.exists() ? userDoc.data()?.balance || INITIAL_BALANCE : INITIAL_BALANCE;
+      newBalance = currentBalance + amount;
+      transaction.update(userRef, {
+        balance: newBalance,
+        lastUpdated: serverTimestamp(),
+      });
+    });
+
+    await addDoc(paymentsCollection, {
+      studentId: uid,
+      schoolId: (await getDoc(userRef)).data()?.schoolId || '',
+      paidTo: 'school',
+      amount,
+      amountPaid: amount,
+      description,
+      type: 'credit',
+      timestamp: Date.now(),
+      status: 'completed',
+      synced: true,
+    });
+
+    await setOfflineItem(`balance_${uid}`, newBalance!);
+  } catch (error) {
+    console.error('Error adding money to student:', error);
+    throw error;
+  }
+};
+
+export const recordOfflineBulkCredit = async (schoolId: string, amount: number, description: string): Promise<void> => {
+  const key = `payment_bulk_${schoolId}_${Date.now()}`;
+  await savePending('payments', {
+    key,
+    action: 'bulkCredit',
+    schoolId,
+    amount,
+    description,
+    timestamp: Date.now(),
+    type: 'credit',
+    status: 'pending',
+  });
+};
+
 // Bulk add money to all students in a school (admin operation)
 export const bulkAddMoneyToStudents = async (schoolId: string, amount: number, description: string): Promise<void> => {
   try {
@@ -222,7 +298,9 @@ export const getUserTransactions = async (uid: string, limit: number = 50): Prom
         synced: false,
       } as Transaction));
 
-    return [...pendingForUser, ...onlineTransactions].slice(0, limit);
+    return [...pendingForUser, ...onlineTransactions]
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+      .slice(0, limit);
   } catch (error) {
     console.error('Error getting transactions:', error);
     return [];
@@ -268,7 +346,7 @@ export const getAllPaymentHistory = async (schoolId: string, limit: number = 100
     const paymentsQuery = query(paymentsCollection, where('schoolId', '==', schoolId), orderBy('timestamp', 'desc'));
     const paymentsSnapshot = await getDocs(paymentsQuery);
 
-    const allTransactions = paymentsSnapshot.docs
+    const onlineTransactions = paymentsSnapshot.docs
       .map((docItem) => {
         const data = docItem.data() as Transaction & { studentId: string };
         const student = studentMap.get(data.studentId);
@@ -282,6 +360,21 @@ export const getAllPaymentHistory = async (schoolId: string, limit: number = 100
           : null;
       })
       .filter(Boolean) as (Transaction & { name: string; email: string })[];
+
+    const pending = await getPendingItems('payments');
+    const pendingTransactions = pending
+      .filter((item) => item.schoolId === schoolId)
+      .map((item: any) => {
+        const student = studentMap.get(item.studentId);
+        return {
+          ...item,
+          name: student?.name || 'Pending student',
+          email: student?.email || 'pending@local',
+          synced: false,
+        } as Transaction & { name: string; email: string };
+      });
+
+    const allTransactions = [...pendingTransactions, ...onlineTransactions].sort((a, b) => b.timestamp - a.timestamp);
 
     return allTransactions.slice(0, limit);
   } catch (error) {
@@ -301,7 +394,8 @@ export const recordOfflinePayment = async (uid: string, schoolId: string, amount
     timestamp: Date.now(),
     synced: false,
     offlineKey: key,
-  };
+    action: 'debit',
+  } as any;
 
   await savePending('payments', {
     ...transaction,

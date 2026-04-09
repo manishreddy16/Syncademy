@@ -2,7 +2,7 @@
 
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore, enableIndexedDbPersistence, disableNetwork, enableNetwork } from "firebase/firestore";
+import { getFirestore, initializeFirestore, CACHE_SIZE_UNLIMITED } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyABEpWXEeTk_kOKNVq2MM-NhExaC0gpIkE",
@@ -18,18 +18,7 @@ const app = initializeApp(firebaseConfig);
 
 // export services
 export const auth = getAuth(app);
-export const db = getFirestore(app);
-
-// Enable offline persistence
-enableIndexedDbPersistence(db).catch((err) => {
-  if (err.code === 'failed-precondition') {
-    console.warn('Multiple tabs open, persistence disabled');
-  } else if (err.code === 'unimplemented') {
-    console.warn('Browser does not support persistence');
-  } else {
-    console.warn('Persistence error:', err);
-  }
-});
+export const db = initializeFirestore(app, { cache: { sizeBytes: CACHE_SIZE_UNLIMITED } });
 
 // Network management utilities
 export const goOffline = () => disableNetwork(db);
