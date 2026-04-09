@@ -4,6 +4,7 @@ import { getSchoolResources } from '../services/resources';
 import { getSchoolAssignments } from '../services/assignments';
 import { getOnlineStatus, subscribeToOnlineStatus } from '../utils/onlineStatus';
 import { fetchPendingStudents, approveStudent } from '../services/api';
+import PendingTasksSection from '../components/PendingTasksSection';
 
 interface AdminDashboardPageProps {
   user: any;
@@ -250,6 +251,9 @@ const AdminDashboardPage = ({ user }: AdminDashboardPageProps) => {
           </table>
         )}
       </div>
+
+      {/* Pending Tasks */}
+      <PendingTasksSection user={user} />
     </div>
   );
 };

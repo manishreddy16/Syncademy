@@ -20,6 +20,7 @@ import MapsPage from './pages/MapsPage';
 import DebugPage from './pages/DebugPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
 import StudentDashboardPage from './pages/StudentDashboardPage';
+import LandingPage from './pages/LandingPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import Sidebar from './components/Sidebar';
 import { logout } from './utils/auth';
@@ -59,7 +60,6 @@ function App() {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (!firebaseUser) {
         setUser(null);
-        navigate('/login');
         return;
       }
 
@@ -98,7 +98,7 @@ function App() {
   const handleLogout = async () => {
     await logout();
     setUser(null);
-    navigate('/login');
+    navigate('/');
   };
 
   const isAdmin = user?.role === 'admin';
@@ -183,11 +183,12 @@ function App() {
         </div>
       ) : (
         <Routes>
+          <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage onLogin={() => setUser(getCurrentUser())} />} />
           <Route path="/register-school" element={<RegisterAdminPage />} />
           <Route path="/register-student" element={<RegisterStudentPage />} />
           <Route path="/debug" element={<DebugPage />} />
-          <Route path="*" element={<LoginPage onLogin={() => setUser(getCurrentUser())} />} />
+          <Route path="*" element={<LandingPage />} />
         </Routes>
       )}
     </div>
